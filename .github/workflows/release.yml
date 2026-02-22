@@ -23,13 +23,11 @@ jobs:
         run: |
           DATE=$(date -u +%Y.%m.%d)
           BASE="v${DATE}"
-          TAG="$BASE"
           N=1
-          while git rev-parse "$TAG" >/dev/null 2>&1; do
-            TAG="${BASE}.${N}"
+          while git rev-parse "${BASE}.${N}" >/dev/null 2>&1; do
             N=$((N + 1))
           done
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=${BASE}.${N}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         id: notes
