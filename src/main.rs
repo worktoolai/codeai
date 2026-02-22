@@ -140,6 +140,7 @@ Kinds: function, method, class, struct, interface, trait, enum, impl, module, na
     #[command(after_help = r#"  codeai open --symbol "src/main.rs#function#main"
   codeai open --symbols "src/a.rs#function#foo,src/b.rs#struct#Bar"
   codeai open --range "src/main.rs:10:0-25:0"
+  codeai open --symbol "src/main.rs#function#main" --max-bytes 4000 --offset 4000  # page 2
 Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
   obtained from: search results (i[][0]), outline results (i[][0])"#)]
     Open {
@@ -162,6 +163,10 @@ Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
         /// Max output bytes
         #[arg(long, default_value = "16000")]
         max_bytes: u64,
+
+        /// Byte offset into content (for pagination)
+        #[arg(long, default_value = "0")]
+        offset: u64,
 
         /// Output format
         #[arg(long, default_value = "thin")]
@@ -238,6 +243,7 @@ fn main() {
             range,
             preview_lines,
             max_bytes,
+            offset,
             fmt,
         } => commands::open::run(commands::open::OpenOpts {
             root,
@@ -246,6 +252,7 @@ fn main() {
             range,
             preview_lines,
             max_bytes,
+            offset,
             fmt,
         }),
     };

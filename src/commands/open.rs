@@ -11,6 +11,7 @@ pub struct OpenOpts {
     pub range: Option<String>,
     pub preview_lines: usize,
     pub max_bytes: u64,
+    pub offset: u64,
     pub fmt: String,
 }
 
@@ -137,7 +138,9 @@ fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()
 
     let block_content = &lines[start..end];
     let limited: Vec<&str> = block_content.iter().take(opts.preview_lines).copied().collect();
-    let content_str = limited.join("\n");
+    let full_content = limited.join("\n");
+
+    let (content_str, truncated) = apply_offset(&full_content, opts.offset, opts.max_bytes);
 
     let range_str = format!("{}:{}-{}:{}", block.start_line, block.start_col, block.end_line, block.end_col);
 
@@ -152,7 +155,9 @@ fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()
         content_str,
     ]);
 
-    let resp = ThinResponse::success("open", opts.max_bytes, vec![item]);
+    let mut resp = ThinResponse::success("open", opts.max_bytes, vec![item]);
+    resp.m.byte_count = content_str.len() as u64;
+    resp.m.truncated = truncated;
     println!("{}", serde_json::to_string(&resp)?);
     Ok(())
 }
@@ -191,7 +196,9 @@ fn run_batch_open(opts: &OpenOpts, store: &Store, symbols: &[String]) -> Result<
 
         let block_content = &lines[start..end];
         let limited: Vec<&str> = block_content.iter().take(opts.preview_lines).copied().collect();
-        let content_str = limited.join("\n");
+        let full_content = limited.join("\n");
+
+        let (content_str, _) = apply_offset(&full_content, opts.offset, opts.max_bytes);
         let content_bytes = content_str.len() as u64;
 
         // Check budget
@@ -279,7 +286,9 @@ fn run_range_open(opts: &OpenOpts) -> Result<()> {
     }
 
     let end = (end_line + 1).min(lines.len());
-    let content_str = lines[start_line..end].join("\n");
+    let full_content = lines[start_line..end].join("\n");
+
+    let (content_str, truncated) = apply_offset(&full_content, opts.offset, opts.max_bytes);
 
     let item = serde_json::json!([
         null,
@@ -291,9 +300,32 @@ fn run_range_open(opts: &OpenOpts) -> Result<()> {
         content_str,
     ]);
 
-    let resp = ThinResponse::success("open", opts.max_bytes, vec![item]);
+    let mut resp = ThinResponse::success("open", opts.max_bytes, vec![item]);
+    resp.m.byte_count = content_str.len() as u64;
+    resp.m.truncated = truncated;
     println!("{}", serde_json::to_string(&resp)?);
     Ok(())
+}
+
+/// Apply byte offset + max_bytes truncation to a content string.
+/// Returns (sliced_content, truncated).
+fn apply_offset(content: &str, offset: u64, max_bytes: u64) -> (String, bool) {
+    let bytes = content.as_bytes();
+    let len = bytes.len() as u64;
+
+    if offset >= len {
+        return (String::new(), false);
+    }
+
+    let start = offset as usize;
+    let remaining = len - offset;
+    let take = (max_bytes as usize).min(remaining as usize);
+    let end = start + take;
+    let truncated = (offset + take as u64) < len;
+
+    // Snap to char boundaries
+    let s = String::from_utf8_lossy(&bytes[start..end]);
+    (s.into_owned(), truncated)
 }
 
 /// Parse "path:L:C-L:C" → (path, (start_line, end_line))
