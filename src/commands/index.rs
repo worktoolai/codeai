@@ -11,6 +11,8 @@ use crate::scanner::Scanner;
 use crate::search::{SearchDoc, SearchIndex};
 use crate::store::{BlockRow, FileMeta, ImportRow, Store};
 
+const IMPORTS_BACKFILL_META_KEY: &str = "imports_backfill_v1_done";
+
 pub struct IndexOpts {
     pub root: PathBuf,
     pub full: bool,
@@ -55,7 +57,16 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     let existing_set: HashSet<String> = existing_paths.iter().cloned().collect();
 
     let filtered_mode = opts.lang_filter.is_some() || opts.path_filter.is_some();
-    let git_mode = !opts.full && !filtered_mode && git_sync.use_git && !git_sync.force_scan;
+    let should_backfill_imports = !opts.full
+        && !filtered_mode
+        && store.import_count()? == 0
+        && store.block_count()? > 0
+        && store.get_meta(IMPORTS_BACKFILL_META_KEY)?.is_none();
+    let git_mode = !opts.full
+        && !filtered_mode
+        && !should_backfill_imports
+        && git_sync.use_git
+        && !git_sync.force_scan;
     let full_compare_mode = opts.full || (!filtered_mode && !git_mode);
 
     let mut files = if git_mode {
@@ -125,6 +136,10 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         .cloned()
         .collect();
 
+    if should_backfill_imports {
+        to_index.extend(existing_set.iter().cloned());
+    }
+
     // Delete removed / renamed-old paths
     for path in &to_delete {
         if let Ok(existing_blocks) = store.blocks_for_file(path) {
@@ -154,10 +169,12 @@ pub fn run(opts: IndexOpts) -> Result<()> {
             continue;
         };
         // Check if file changed
-        if let Some(existing) = store.get_file(&file.rel_path)? {
-            if existing.mtime == file.mtime && existing.size == file.size {
-                skipped += 1;
-                continue;
+        if !should_backfill_imports {
+            if let Some(existing) = store.get_file(&file.rel_path)? {
+                if existing.mtime == file.mtime && existing.size == file.size {
+                    skipped += 1;
+                    continue;
+                }
             }
         }
 
@@ -175,19 +192,21 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         let content_hash = format!("{:016x}", xxh3_64(&content));
 
         // Check hash for actual change
-        if let Some(existing) = store.get_file(&file.rel_path)? {
-            if existing.content_hash == content_hash {
-                // mtime changed but content didn't — update mtime only
-                store.upsert_file(&FileMeta {
-                    path: file.rel_path.clone(),
-                    mtime: file.mtime,
-                    size: file.size,
-                    content_hash,
-                    language: existing.language,
-                    parse_error: existing.parse_error,
-                })?;
-                skipped += 1;
-                continue;
+        if !should_backfill_imports {
+            if let Some(existing) = store.get_file(&file.rel_path)? {
+                if existing.content_hash == content_hash {
+                    // mtime changed but content didn't — update mtime only
+                    store.upsert_file(&FileMeta {
+                        path: file.rel_path.clone(),
+                        mtime: file.mtime,
+                        size: file.size,
+                        content_hash,
+                        language: existing.language,
+                        parse_error: existing.parse_error,
+                    })?;
+                    skipped += 1;
+                    continue;
+                }
             }
         }
 
@@ -358,6 +377,10 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     // Commit search index
     search_writer.commit().context("commit search index")?;
     search_index.reload()?;
+
+    if should_backfill_imports {
+        let _ = store.set_meta(IMPORTS_BACKFILL_META_KEY, "1");
+    }
 
     // Persist current git HEAD for next incremental sync (best effort)
     if let Some(head) = current_git_head(&opts.root) {

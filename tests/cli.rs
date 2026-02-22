@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use rusqlite::Connection;
 use std::fs;
 use tempfile::TempDir;
 
@@ -1118,6 +1119,56 @@ fn test_graph_empty_index() {
     assert!(output.status.success());
     let resp = parse_response(&output.stdout);
     assert_eq!(resp["e"]["code"].as_str().unwrap(), "INDEX_EMPTY");
+}
+
+#[test]
+fn test_index_backfills_imports_without_full() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let db_path = dir.path().join(".worktoolai/codeai/index.db");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute("DELETE FROM imports", []).unwrap();
+    conn.execute(
+        "DELETE FROM meta WHERE key = 'imports_backfill_v1_done'",
+        [],
+    )
+    .unwrap();
+
+    let repaired = codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let repaired_resp = parse_response(&repaired.stdout);
+    let repaired_info = &repaired_resp["i"][0];
+
+    assert!(
+        repaired_info["indexed_files"].as_u64().unwrap() >= 4,
+        "backfill run should reprocess indexed files"
+    );
+    assert!(
+        repaired_info["total_imports"].as_u64().unwrap() > 0,
+        "backfill run should restore imports without --full"
+    );
+
+    let graph = codeai()
+        .args(["graph", "src/main.rs", "--fmt", "thin"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let graph_resp = parse_response(&graph.stdout);
+    let summary = &graph_resp["i"][0];
+    assert!(
+        summary["edges"].as_u64().unwrap() >= 2,
+        "graph should show internal edges after backfill"
+    );
 }
 
 #[test]
