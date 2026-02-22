@@ -1,0 +1,42 @@
+[package]
+name = "codeai"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# File scanning
+walkdir = "2"
+ignore = "0.4"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Search
+tantivy = "0.22"
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Tree-sitter
+tree-sitter = "0.24"
+tree-sitter-go = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-bash = "0.23"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
