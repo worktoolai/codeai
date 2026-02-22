@@ -43,12 +43,21 @@ The root cause: **every existing tool treats files as the atomic unit**. But age
 | **Stable IDs** | `symbol_id` survives code edits (as long as the function isn't renamed/deleted). No more stale line numbers. |
 | **Incremental sync** | Only re-indexes changed files. Sub-second updates after edits. |
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/worktoolai/codeai/main/install.sh | sh
+```
+
+Or build from source:
+
+```bash
+cargo install --path .
+```
+
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
-
 # Index your project (run from project root)
 codeai index
 
