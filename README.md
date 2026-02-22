@@ -13,8 +13,8 @@ $ codeai search "payment validation failed"
 # Read only that function, not the whole file.
 $ codeai open --symbol "services/payment/validate.go#func#ValidatePayment"
 
-# Need the full picture? See what it calls, in one shot.
-$ codeai open --symbol "..." --with=callees
+# See the full dependency tree from any entry point.
+$ codeai graph src/main.rs
 ```
 
 ## The Problem
@@ -65,6 +65,7 @@ codeai index
 codeai search "authenticate user"
 codeai outline src/auth/handler.go
 codeai open --symbol "src/auth/handler.go#function#AuthenticateUser"
+codeai graph src/main.rs
 ```
 
 ## Commands
@@ -126,6 +127,56 @@ codeai open --symbols "id1,id2,id3" --max-bytes 32000
 codeai open --range "src/main.rs:10:0-50:0"
 ```
 
+### `codeai graph <path>`
+
+Show the import/dependency graph starting from an entry file. Extracts imports at index time using Tree-sitter AST, resolves them to project files, and walks the graph via BFS.
+
+```bash
+# ASCII tree (default, human-readable)
+codeai graph src/main.rs
+
+# Compact JSON for agents
+codeai graph src/main.rs --fmt thin
+
+# Limit BFS depth
+codeai graph src/main.rs --depth 2
+
+# Paginate edges
+codeai graph src/main.rs --fmt thin --limit 10
+codeai graph src/main.rs --fmt thin --limit 10 --offset 10
+```
+
+Tree output:
+```
+src/main.rs
+├── src/commands/mod.rs
+│   ├── src/commands/index.rs
+│   │   ├── src/lang.rs
+│   │   ├── src/parser.rs
+│   │   └── src/store.rs
+│   └── src/commands/search.rs
+│       └── src/store.rs (cycle)
+├── src/models.rs
+└── [ext] clap
+
+5 files, 7 edges, 1 cycles (--limit 50 --offset 0)
+```
+
+Thin JSON output (`--fmt thin`):
+```json
+{
+  "v": 1,
+  "m": ["graph", 12000, 2400, 0, null],
+  "i": [
+    {"entry": "src/main.rs", "files": 5, "edges": 7, "cycles": 1, "external": 3, "depth": 3},
+    [
+      ["src/main.rs", "src/commands/mod.rs", "crate::commands", "module"],
+      ["src/main.rs", null, "clap::{Parser, Subcommand}", "external"]
+    ]
+  ]
+}
+```
+
 ## Output Format
 
 All output is **Thin JSON** — tuple-based minimal JSON designed for agents:
@@ -178,7 +229,7 @@ codeai is designed as an MCP tool or CLI tool for AI agents. The typical loop:
 ```
 1. search  →  find candidate blocks (even with fuzzy recall)
 2. open    →  read just those blocks
-3. open --with=callees  →  expand context if needed
+3. graph   →  understand file dependencies from any entry point
 4. repeat with refined search if needed
 ```
 
@@ -190,7 +241,7 @@ Every response is bounded, structured, and includes hints for the next action. N
 # Build
 cargo build
 
-# Run tests (unit + 25 CLI integration tests)
+# Run tests (unit + 31 CLI integration tests)
 cargo test
 
 # Run only CLI integration tests

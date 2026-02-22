@@ -9,7 +9,7 @@ use crate::models::{self, build_symbol_id, BlockKind};
 use crate::parser;
 use crate::scanner::Scanner;
 use crate::search::{SearchDoc, SearchIndex};
-use crate::store::{BlockRow, FileMeta, Store};
+use crate::store::{BlockRow, FileMeta, ImportRow, Store};
 
 pub struct IndexOpts {
     pub root: PathBuf,
@@ -117,6 +117,13 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     }
 
     let mut search_writer = search_index.writer()?;
+
+    // Build all_paths set for import resolution
+    let all_paths_set: HashSet<String> = existing_set
+        .iter()
+        .chain(file_map.keys())
+        .cloned()
+        .collect();
 
     // Delete removed / renamed-old paths
     for path in &to_delete {
@@ -317,6 +324,34 @@ pub fn run(opts: IndexOpts) -> Result<()> {
 
         // Store blocks
         store.replace_blocks(&file.rel_path, &block_rows)?;
+
+        // Extract and store imports
+        if !config.import_nodes.is_empty() {
+            let ts_lang_for_imports = lang::ts_language_for_extension(&file.extension).unwrap();
+            if let Ok(extracted_imports) =
+                parser::extract_imports(&content, ts_lang_for_imports, config.import_nodes)
+            {
+                let import_rows: Vec<ImportRow> = extracted_imports
+                    .iter()
+                    .map(|ei| {
+                        let resolved = parser::resolve_import(
+                            &ei.raw_import,
+                            &file.rel_path,
+                            config.language,
+                            &all_paths_set,
+                        );
+                        ImportRow {
+                            path: file.rel_path.clone(),
+                            raw_import: ei.raw_import.clone(),
+                            resolved_path: resolved,
+                            kind: ei.kind.clone(),
+                        }
+                    })
+                    .collect();
+                let _ = store.replace_imports(&file.rel_path, &import_rows);
+            }
+        }
+
         indexed_files += 1;
     }
 
@@ -334,6 +369,7 @@ pub fn run(opts: IndexOpts) -> Result<()> {
 
     // Output result
     let total_blocks = store.block_count()?;
+    let total_imports = store.import_count()?;
     let resp = models::ThinResponse::success(
         "index",
         opts.max_bytes,
@@ -344,6 +380,7 @@ pub fn run(opts: IndexOpts) -> Result<()> {
             "skipped_files": skipped,
             "errors": errors,
             "total_blocks": total_blocks,
+            "total_imports": total_imports,
         })],
     );
 

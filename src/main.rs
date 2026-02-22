@@ -15,15 +15,16 @@ use std::path::PathBuf;
 #[command(
     name = "codeai",
     about = "Agent-first code exploration",
-    after_help = r#"Workflow: index → search/outline → open
+    after_help = r#"Workflow: index → search/outline/graph → open
   index                  build/update block index (auto-skips unchanged files)
   search QUERY           full-text + semantic search across blocks
   outline PATH           list blocks in a file (functions, structs, etc.)
   open --symbol ID       read block content by symbol ID
+  graph PATH             show import/dependency graph from entry file
 Symbol ID: path#kind#name (e.g. "src/main.rs#function#main")
 Block kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol
 Languages: go, rust, python, typescript, tsx, javascript, jsx, java, kotlin, c, cpp, csharp, swift, scala, ruby, php, bash, hcl
-Output: --fmt thin (default, compact JSON) | json (pretty) | lines (one per line)
+Output: --fmt thin (default, compact JSON) | json (pretty) | lines (one per line) | tree (graph)
 Exit: 0=ok, 1=error"#
 )]
 struct Cli {
@@ -178,6 +179,40 @@ Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
         #[arg(long, default_value = "thin")]
         fmt: String,
     },
+
+    /// Show import/dependency graph from entry file
+    #[command(
+        after_help = r#"  codeai graph src/main.rs                       # ASCII tree (default)
+  codeai graph src/main.rs --fmt thin              # compact JSON for agents
+  codeai graph src/main.rs --depth 2               # limit BFS depth
+  codeai graph src/main.rs --fmt thin --limit 5    # paginate edges
+  codeai graph src/main.rs --fmt thin --limit 5 --offset 5  # page 2
+Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
+    )]
+    Graph {
+        /// Entry file path (project-relative)
+        path: String,
+
+        /// Max BFS depth
+        #[arg(long, default_value = "10")]
+        depth: usize,
+
+        /// Max edges per page
+        #[arg(long, default_value = "50")]
+        limit: usize,
+
+        /// Edge offset for pagination
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Max output bytes
+        #[arg(long, default_value = "12000")]
+        max_bytes: u64,
+
+        /// Output format: tree, thin
+        #[arg(long, default_value = "tree")]
+        fmt: String,
+    },
 }
 
 fn main() {
@@ -259,6 +294,23 @@ fn main() {
             preview_lines,
             max_bytes,
             offset,
+            fmt,
+        }),
+
+        Commands::Graph {
+            path,
+            depth,
+            limit,
+            offset,
+            max_bytes,
+            fmt,
+        } => commands::graph::run(commands::graph::GraphOpts {
+            root,
+            path,
+            depth,
+            limit,
+            offset,
+            max_bytes,
             fmt,
         }),
     };

@@ -30,6 +30,14 @@ pub struct BlockRow {
     pub preview: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImportRow {
+    pub path: String,
+    pub raw_import: String,
+    pub resolved_path: Option<String>,
+    pub kind: String,
+}
+
 // ── Store ──
 
 pub struct Store {
@@ -82,7 +90,17 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS idx_blocks_path ON blocks(path);
             CREATE INDEX IF NOT EXISTS idx_blocks_name ON blocks(name);
-            CREATE INDEX IF NOT EXISTS idx_blocks_kind ON blocks(kind);",
+            CREATE INDEX IF NOT EXISTS idx_blocks_kind ON blocks(kind);
+
+            CREATE TABLE IF NOT EXISTS imports (
+                path TEXT NOT NULL,
+                raw_import TEXT NOT NULL,
+                resolved_path TEXT,
+                kind TEXT NOT NULL DEFAULT 'module',
+                UNIQUE(path, raw_import)
+            );
+            CREATE INDEX IF NOT EXISTS idx_imports_path ON imports(path);
+            CREATE INDEX IF NOT EXISTS idx_imports_resolved ON imports(resolved_path);",
         )?;
         Ok(())
     }
@@ -182,6 +200,8 @@ impl Store {
     pub fn delete_file(&self, path: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM blocks WHERE path = ?1", params![path])?;
+        self.conn
+            .execute("DELETE FROM imports WHERE path = ?1", params![path])?;
         self.conn
             .execute("DELETE FROM files WHERE path = ?1", params![path])?;
         Ok(())
@@ -326,9 +346,54 @@ impl Store {
     pub fn clear_all(&self) -> Result<()> {
         self.conn.execute_batch(
             "DELETE FROM blocks;
+             DELETE FROM imports;
              DELETE FROM files;
              DELETE FROM meta;",
         )?;
         Ok(())
+    }
+
+    // ── Imports ──
+
+    pub fn replace_imports(&self, path: &str, rows: &[ImportRow]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM imports WHERE path = ?1", params![path])?;
+        let mut stmt = tx.prepare(
+            "INSERT INTO imports (path, raw_import, resolved_path, kind)
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for r in rows {
+            stmt.execute(params![r.path, r.raw_import, r.resolved_path, r.kind])?;
+        }
+        drop(stmt);
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn imports_for_file(&self, path: &str) -> Result<Vec<ImportRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, raw_import, resolved_path, kind
+             FROM imports WHERE path = ?1",
+        )?;
+        let rows = stmt.query_map(params![path], |row| {
+            Ok(ImportRow {
+                path: row.get(0)?,
+                raw_import: row.get(1)?,
+                resolved_path: row.get(2)?,
+                kind: row.get(3)?,
+            })
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn import_count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM imports", [], |row| row.get(0))?;
+        Ok(count as u64)
     }
 }

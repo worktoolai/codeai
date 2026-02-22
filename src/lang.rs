@@ -11,6 +11,25 @@ pub enum DocStyle {
     Generic,
 }
 
+// ── Import extraction config ──
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportNodeConfig {
+    pub node_type: &'static str,
+    pub extractor: ImportExtractor,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ImportExtractor {
+    Field(&'static str),
+    StringField(&'static str),
+    GoImport,
+    JavaImport,
+    CInclude,
+    RubyRequire,
+    BashSource,
+}
+
 // ── LangConfig ──
 
 #[derive(Debug, Clone)]
@@ -20,6 +39,7 @@ pub struct LangConfig {
     pub function_nodes: &'static [&'static str],
     pub class_nodes: &'static [&'static str],
     pub doc_style: DocStyle,
+    pub import_nodes: &'static [ImportNodeConfig],
 }
 
 // ── Language definitions ──
@@ -30,6 +50,10 @@ pub static GO: LangConfig = LangConfig {
     function_nodes: &["function_declaration", "method_declaration"],
     class_nodes: &["type_declaration"],
     doc_style: DocStyle::LineComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_declaration",
+        extractor: ImportExtractor::GoImport,
+    }],
 };
 
 pub static RUST: LangConfig = LangConfig {
@@ -38,6 +62,10 @@ pub static RUST: LangConfig = LangConfig {
     function_nodes: &["function_item"],
     class_nodes: &["impl_item", "struct_item", "enum_item", "trait_item"],
     doc_style: DocStyle::RustDoc,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "use_declaration",
+        extractor: ImportExtractor::Field("argument"),
+    }],
 };
 
 pub static PYTHON: LangConfig = LangConfig {
@@ -46,6 +74,16 @@ pub static PYTHON: LangConfig = LangConfig {
     function_nodes: &["function_definition"],
     class_nodes: &["class_definition"],
     doc_style: DocStyle::Docstring,
+    import_nodes: &[
+        ImportNodeConfig {
+            node_type: "import_statement",
+            extractor: ImportExtractor::Field("name"),
+        },
+        ImportNodeConfig {
+            node_type: "import_from_statement",
+            extractor: ImportExtractor::Field("module_name"),
+        },
+    ],
 };
 
 pub static TYPESCRIPT: LangConfig = LangConfig {
@@ -58,6 +96,10 @@ pub static TYPESCRIPT: LangConfig = LangConfig {
     ],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_statement",
+        extractor: ImportExtractor::StringField("source"),
+    }],
 };
 
 pub static TSX: LangConfig = LangConfig {
@@ -70,6 +112,10 @@ pub static TSX: LangConfig = LangConfig {
     ],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_statement",
+        extractor: ImportExtractor::StringField("source"),
+    }],
 };
 
 pub static JAVASCRIPT: LangConfig = LangConfig {
@@ -82,6 +128,10 @@ pub static JAVASCRIPT: LangConfig = LangConfig {
     ],
     class_nodes: &["class_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_statement",
+        extractor: ImportExtractor::StringField("source"),
+    }],
 };
 
 pub static JSX: LangConfig = LangConfig {
@@ -94,6 +144,10 @@ pub static JSX: LangConfig = LangConfig {
     ],
     class_nodes: &["class_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_statement",
+        extractor: ImportExtractor::StringField("source"),
+    }],
 };
 
 pub static JAVA: LangConfig = LangConfig {
@@ -102,6 +156,10 @@ pub static JAVA: LangConfig = LangConfig {
     function_nodes: &["method_declaration"],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "import_declaration",
+        extractor: ImportExtractor::JavaImport,
+    }],
 };
 
 pub static KOTLIN: LangConfig = LangConfig {
@@ -110,6 +168,7 @@ pub static KOTLIN: LangConfig = LangConfig {
     function_nodes: &["function_declaration"],
     class_nodes: &["class_declaration", "object_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[],
 };
 
 pub static C: LangConfig = LangConfig {
@@ -118,6 +177,10 @@ pub static C: LangConfig = LangConfig {
     function_nodes: &["function_definition"],
     class_nodes: &["struct_specifier"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "preproc_include",
+        extractor: ImportExtractor::CInclude,
+    }],
 };
 
 pub static CPP: LangConfig = LangConfig {
@@ -126,6 +189,10 @@ pub static CPP: LangConfig = LangConfig {
     function_nodes: &["function_definition"],
     class_nodes: &["class_specifier", "namespace_definition"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "preproc_include",
+        extractor: ImportExtractor::CInclude,
+    }],
 };
 
 pub static CSHARP: LangConfig = LangConfig {
@@ -134,6 +201,7 @@ pub static CSHARP: LangConfig = LangConfig {
     function_nodes: &["method_declaration"],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[],
 };
 
 pub static SWIFT: LangConfig = LangConfig {
@@ -142,6 +210,7 @@ pub static SWIFT: LangConfig = LangConfig {
     function_nodes: &["function_declaration"],
     class_nodes: &["class_declaration", "protocol_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[],
 };
 
 pub static SCALA: LangConfig = LangConfig {
@@ -150,6 +219,7 @@ pub static SCALA: LangConfig = LangConfig {
     function_nodes: &["function_definition"],
     class_nodes: &["class_definition", "object_definition", "trait_definition"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[],
 };
 
 pub static RUBY: LangConfig = LangConfig {
@@ -158,6 +228,10 @@ pub static RUBY: LangConfig = LangConfig {
     function_nodes: &["method"],
     class_nodes: &["class", "module"],
     doc_style: DocStyle::Generic,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "call",
+        extractor: ImportExtractor::RubyRequire,
+    }],
 };
 
 pub static PHP: LangConfig = LangConfig {
@@ -166,6 +240,7 @@ pub static PHP: LangConfig = LangConfig {
     function_nodes: &["function_definition", "method_declaration"],
     class_nodes: &["class_declaration"],
     doc_style: DocStyle::BlockComment,
+    import_nodes: &[],
 };
 
 pub static BASH: LangConfig = LangConfig {
@@ -174,6 +249,10 @@ pub static BASH: LangConfig = LangConfig {
     function_nodes: &["function_definition"],
     class_nodes: &[],
     doc_style: DocStyle::Generic,
+    import_nodes: &[ImportNodeConfig {
+        node_type: "command",
+        extractor: ImportExtractor::BashSource,
+    }],
 };
 
 pub static HCL: LangConfig = LangConfig {
@@ -182,6 +261,7 @@ pub static HCL: LangConfig = LangConfig {
     function_nodes: &[],
     class_nodes: &["block"],
     doc_style: DocStyle::Generic,
+    import_nodes: &[],
 };
 
 static ALL_CONFIGS: &[&LangConfig] = &[

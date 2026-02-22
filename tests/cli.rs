@@ -103,6 +103,47 @@ impl Calculator {
     )
     .unwrap();
 
+    // Rust files with import relationships for graph testing
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/main.rs"),
+        r#"use crate::models;
+use crate::store::Store;
+
+mod models;
+mod store;
+
+fn main() {
+    let s = Store::new();
+    let m = models::Model::default();
+    println!("{:?}", m);
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/models.rs"),
+        r#"#[derive(Debug, Default)]
+pub struct Model {
+    pub name: String,
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/store.rs"),
+        r#"use crate::models::Model;
+
+pub struct Store;
+
+impl Store {
+    pub fn new() -> Self { Store }
+    pub fn get(&self) -> Model { Model::default() }
+}
+"#,
+    )
+    .unwrap();
+
     // JavaScript file
     fs::write(
         root.join("utils/format.js"),
@@ -959,8 +1000,124 @@ fn test_gitignore_respected() {
     let resp = parse_response(&output.stdout);
     let info = &resp["i"][0];
 
-    // Only validate.go should be indexed (utils/ is ignored)
-    assert_eq!(info["indexed_files"].as_u64().unwrap(), 1);
+    // validate.go + src/*.rs should be indexed (utils/ is ignored)
+    assert_eq!(info["indexed_files"].as_u64().unwrap(), 4);
+}
+
+// ── Graph tests ──
+
+#[test]
+fn test_graph_tree_output() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["graph", "src/main.rs"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should show entry file
+    assert!(
+        stdout.contains("src/main.rs"),
+        "tree should show entry file"
+    );
+    // Should show resolved dependency
+    assert!(
+        stdout.contains("src/models.rs"),
+        "tree should show models.rs dependency: {stdout}"
+    );
+    assert!(
+        stdout.contains("src/store.rs"),
+        "tree should show store.rs dependency: {stdout}"
+    );
+    // Summary line
+    assert!(stdout.contains("files"), "tree should have summary line");
+    assert!(stdout.contains("edges"), "tree should have edge count");
+}
+
+#[test]
+fn test_graph_thin_output() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["graph", "src/main.rs", "--fmt", "thin"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    assert_eq!(resp["v"], 1);
+    assert_eq!(resp["m"][0], "graph");
+
+    // i[0] = summary object
+    let summary = &resp["i"][0];
+    assert_eq!(summary["entry"], "src/main.rs");
+    assert!(summary["files"].as_u64().unwrap() >= 2, "should have at least 2 files");
+    assert!(summary["edges"].as_u64().unwrap() >= 2, "should have at least 2 internal edges");
+
+    // i[1] = edge array
+    let edges = resp["i"][1].as_array().unwrap();
+    assert!(!edges.is_empty(), "should have edges");
+
+    // Each edge = [from, to|null, raw_import, kind]
+    for edge in edges {
+        let arr = edge.as_array().unwrap();
+        assert_eq!(arr.len(), 4, "edge tuple should have 4 elements");
+        assert!(arr[0].is_string(), "from should be string");
+        // arr[1] can be string or null
+        assert!(arr[2].is_string(), "raw_import should be string");
+        assert!(arr[3].is_string(), "kind should be string");
+    }
+}
+
+#[test]
+fn test_graph_file_not_found() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["graph", "nonexistent.rs"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "FILE_NOT_FOUND");
+}
+
+#[test]
+fn test_graph_empty_index() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["graph", "src/main.rs"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "INDEX_EMPTY");
 }
 
 #[test]
