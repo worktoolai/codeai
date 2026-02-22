@@ -187,6 +187,7 @@ Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
   codeai graph src/main.rs --depth 2               # limit BFS depth
   codeai graph src/main.rs --fmt thin --limit 5    # paginate edges
   codeai graph src/main.rs --fmt thin --limit 5 --offset 5  # page 2
+  codeai graph src/main.rs --external              # include unresolved external imports
 Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
     )]
     Graph {
@@ -204,6 +205,10 @@ Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
         /// Edge offset for pagination
         #[arg(long, default_value = "0")]
         offset: usize,
+
+        /// Include unresolved external imports
+        #[arg(long, default_value_t = false)]
+        external: bool,
 
         /// Max output bytes
         #[arg(long, default_value = "12000")]
@@ -302,6 +307,7 @@ fn main() {
             depth,
             limit,
             offset,
+            external,
             max_bytes,
             fmt,
         } => commands::graph::run(commands::graph::GraphOpts {
@@ -310,6 +316,7 @@ fn main() {
             depth,
             limit,
             offset,
+            external,
             max_bytes,
             fmt,
         }),

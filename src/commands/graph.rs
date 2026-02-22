@@ -11,6 +11,7 @@ pub struct GraphOpts {
     pub depth: usize,
     pub limit: usize,
     pub offset: usize,
+    pub external: bool,
     pub max_bytes: u64,
     pub fmt: String,
 }
@@ -81,7 +82,7 @@ pub fn run(opts: GraphOpts) -> Result<()> {
         return Ok(());
     }
 
-    let graph = build_graph(&store, &entry_path, opts.depth)?;
+    let graph = build_graph(&store, &entry_path, opts.depth, opts.external)?;
 
     match opts.fmt.as_str() {
         "thin" => print_thin(&graph, &opts)?,
@@ -91,7 +92,7 @@ pub fn run(opts: GraphOpts) -> Result<()> {
     Ok(())
 }
 
-fn build_graph(store: &Store, entry: &str, max_depth: usize) -> Result<GraphResult> {
+fn build_graph(store: &Store, entry: &str, max_depth: usize, include_external: bool) -> Result<GraphResult> {
     let mut edges = Vec::new();
     let mut visited = HashSet::new();
     let mut files = HashSet::new();
@@ -138,12 +139,14 @@ fn build_graph(store: &Store, entry: &str, max_depth: usize) -> Result<GraphResu
                 }
                 None => {
                     external_count += 1;
-                    edges.push(Edge {
-                        from: path.clone(),
-                        to: None,
-                        raw_import: imp.raw_import.clone(),
-                        kind: "external".to_string(),
-                    });
+                    if include_external {
+                        edges.push(Edge {
+                            from: path.clone(),
+                            to: None,
+                            raw_import: imp.raw_import.clone(),
+                            kind: "external".to_string(),
+                        });
+                    }
                 }
             }
         }

@@ -110,6 +110,7 @@ impl Calculator {
         root.join("src/main.rs"),
         r#"use crate::models;
 use crate::store::Store;
+use std::fmt;
 
 mod models;
 mod store;
@@ -1071,6 +1072,9 @@ fn test_graph_thin_output() {
     assert!(summary["files"].as_u64().unwrap() >= 2, "should have at least 2 files");
     assert!(summary["edges"].as_u64().unwrap() >= 2, "should have at least 2 internal edges");
 
+    // external imports are excluded by default
+    assert_eq!(summary["external"].as_u64().unwrap(), 1);
+
     // i[1] = edge array
     let edges = resp["i"][1].as_array().unwrap();
     assert!(!edges.is_empty(), "should have edges");
@@ -1084,6 +1088,11 @@ fn test_graph_thin_output() {
         assert!(arr[2].is_string(), "raw_import should be string");
         assert!(arr[3].is_string(), "kind should be string");
     }
+
+    assert!(
+        edges.iter().all(|edge| edge.as_array().unwrap()[1].is_string()),
+        "default graph output should not include external edges"
+    );
 }
 
 #[test]
@@ -1104,6 +1113,34 @@ fn test_graph_file_not_found() {
     assert!(output.status.success());
     let resp = parse_response(&output.stdout);
     assert_eq!(resp["e"]["code"].as_str().unwrap(), "FILE_NOT_FOUND");
+}
+
+#[test]
+fn test_graph_external_flag_includes_external_edges() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["graph", "src/main.rs", "--fmt", "thin", "--external"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    let summary = &resp["i"][0];
+    assert_eq!(summary["external"].as_u64().unwrap(), 1);
+
+    let edges = resp["i"][1].as_array().unwrap();
+    assert!(
+        edges.iter().any(|edge| edge.as_array().unwrap()[1].is_null()),
+        "--external should include external edges"
+    );
 }
 
 #[test]
