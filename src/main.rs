@@ -12,7 +12,20 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "codeai", about = "Agent-first code exploration")]
+#[command(
+    name = "codeai",
+    about = "Agent-first code exploration",
+    after_help = r#"Workflow: index → search/outline → open
+  index                  build/update block index (auto-skips unchanged files)
+  search QUERY           full-text + semantic search across blocks
+  outline PATH           list blocks in a file (functions, structs, etc.)
+  open --symbol ID       read block content by symbol ID
+Symbol ID: path#kind#name (e.g. "src/main.rs#function#main")
+Block kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol
+Languages: go, rust, python, typescript, tsx, javascript, jsx, java, kotlin, c, cpp, csharp, swift, scala, ruby, php, bash, hcl
+Output: --fmt thin (default, compact JSON) | json (pretty) | lines (one per line)
+Exit: 0=ok, 1=error"#
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -21,6 +34,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Index the codebase
+    #[command(after_help = r#"  codeai index                       # incremental index (skips unchanged)
+  codeai index --full                # full reindex from scratch
+  codeai index --lang rust           # only Rust files
+  codeai index --path src/           # only files under src/"#)]
     Index {
         /// Full reindex (delete existing index first)
         #[arg(long)]
@@ -56,6 +73,10 @@ enum Commands {
     },
 
     /// Search for code blocks
+    #[command(after_help = r#"  codeai search "parse"              # search all blocks
+  codeai search "validate" --lang go # only Go blocks
+  codeai search "auth" --limit 5     # limit results
+  codeai search "error" --path src/  # only in src/"#)]
     Search {
         /// Search query
         query: String,
@@ -86,6 +107,10 @@ enum Commands {
     },
 
     /// List blocks in a file
+    #[command(after_help = r#"  codeai outline src/main.rs                  # all blocks
+  codeai outline src/main.rs --kind function  # functions only
+  codeai outline src/main.rs --kind struct    # structs only
+Kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol"#)]
     Outline {
         /// File path (project-relative)
         path: String,
@@ -111,7 +136,12 @@ enum Commands {
         fmt: String,
     },
 
-    /// Open (read) code blocks
+    /// Open (read) code blocks by symbol ID
+    #[command(after_help = r#"  codeai open --symbol "src/main.rs#function#main"
+  codeai open --symbols "src/a.rs#function#foo,src/b.rs#struct#Bar"
+  codeai open --range "src/main.rs:10:0-25:0"
+Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
+  obtained from: search results (i[][0]), outline results (i[][0])"#)]
     Open {
         /// Single symbol ID
         #[arg(long)]
