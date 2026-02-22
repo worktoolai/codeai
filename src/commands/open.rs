@@ -15,7 +15,7 @@ pub struct OpenOpts {
 }
 
 pub fn run(opts: OpenOpts) -> Result<()> {
-    let codeai_dir = opts.root.join(".codeai");
+    let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
 
     if opts.range.is_some() {

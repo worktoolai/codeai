@@ -89,8 +89,8 @@ impl Scanner {
             .git_exclude(false)
             .follow_links(true);
 
-        // Add .codeai/ignore if it exists
-        let codeai_ignore = self.root.join(".codeai").join("ignore");
+        // Add .worktoolai/codeai/ignore if it exists
+        let codeai_ignore = self.root.join(".worktoolai").join("codeai").join("ignore");
         if codeai_ignore.exists() {
             builder.add_ignore(&codeai_ignore);
         }

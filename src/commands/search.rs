@@ -17,7 +17,7 @@ pub struct SearchOpts {
 }
 
 pub fn run(opts: SearchOpts) -> Result<()> {
-    let codeai_dir = opts.root.join(".codeai");
+    let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
     let search_dir = codeai_dir.join("search");
 

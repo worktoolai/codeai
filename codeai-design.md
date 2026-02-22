@@ -103,10 +103,10 @@ DB/Index: cache for fast, minimal reads.
 
 ### 4.1 인덱스 저장 위치 및 라이프사이클
 
-**저장 경로**: `.codeai/` 디렉토리 (프로젝트 루트)
+**저장 경로**: `.worktoolai/codeai/` 디렉토리 (프로젝트 루트)
 
 ```
-.codeai/
+.worktoolai/codeai/
 ├── index.db          # SQLite (블록 메타, 파일 메타)
 ├── search/           # Tantivy 검색 인덱스
 ├── ignore            # 사용자 제외 패턴 (선택)
@@ -114,13 +114,13 @@ DB/Index: cache for fast, minimal reads.
 ```
 
 **락 정책**:
-- `index` 실행 시 `.codeai/lock` 파일로 배타적 락 획득
+- `index` 실행 시 `.worktoolai/codeai/lock` 파일로 배타적 락 획득
 - 락 보유 중 다른 `index` 호출 → `INDEX_BUSY` 에러 반환
 - 비정상 종료 시 stale 락 감지: 락 파일 내 PID 확인 → 프로세스 부재 시 자동 해제
 
 **정리 정책**:
 - `codeai index --full`: 기존 인덱스 삭제 후 전체 재구축
-- `.codeai/` 삭제 후 `codeai index`: 완전 초기 상태에서 재구축 (안전)
+- `.worktoolai/codeai/` 삭제 후 `codeai index`: 완전 초기 상태에서 재구축 (안전)
 
 **브랜치 전환**: 인덱스는 브랜치를 구분하지 않는다. 파일 변경 기반 증분 인덱싱이므로, 브랜치 전환 후 `codeai index`를 실행하면 변경된 파일만 자동 갱신된다.
 
@@ -446,7 +446,7 @@ items 튜플 정의(커맨드별 고정):
 ### 10.3 사용자 설정
 
 - `codeai index --ignore-file <path>`: 추가 제외 패턴 파일 지정
-- `.codeai/ignore`: 프로젝트 루트의 커스텀 제외 패턴 (`.gitignore` 문법 동일)
+- `.worktoolai/codeai/ignore`: 프로젝트 루트의 커스텀 제외 패턴 (`.gitignore` 문법 동일)
 - `codeai index --no-default-ignores`: 기본 제외 패턴 비활성화
 
 ### 10.4 우선순위 (높은 것이 우선)
@@ -456,7 +456,7 @@ items 튜플 정의(커맨드별 고정):
 | 우선순위 | 소스 | 설명 |
 |----------|------|------|
 | 1 (최우선) | CLI 플래그 (`--ignore-file`, `--no-default-ignores`, `--no-gitignore`) | 명시적 CLI 인자가 항상 최우선 |
-| 2 | `.codeai/ignore` | 프로젝트별 커스텀 제외 |
+| 2 | `.worktoolai/codeai/ignore` | 프로젝트별 커스텀 제외 |
 | 3 | `.gitignore` (중첩 포함) | 디렉토리별 .gitignore |
 | 4 (최하위) | Built-in 기본 제외 | 코드에 하드코딩된 기본 패턴 |
 

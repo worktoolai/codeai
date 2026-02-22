@@ -15,7 +15,7 @@ pub struct OutlineOpts {
 }
 
 pub fn run(opts: OutlineOpts) -> Result<()> {
-    let codeai_dir = opts.root.join(".codeai");
+    let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
 
     if !db_path.exists() {

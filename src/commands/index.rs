@@ -22,7 +22,7 @@ pub struct IndexOpts {
 }
 
 pub fn run(opts: IndexOpts) -> Result<()> {
-    let codeai_dir = opts.root.join(".codeai");
+    let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     std::fs::create_dir_all(&codeai_dir)?;
 
     let db_path = codeai_dir.join("index.db");
