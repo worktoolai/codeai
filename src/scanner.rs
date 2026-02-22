@@ -41,6 +41,7 @@ const BUILT_IN_IGNORE_DIRS: &[&str] = &[
     ".git",
     ".svn",
     ".hg",
+    ".worktoolai",
 ];
 
 const BUILT_IN_IGNORE_EXTS: &[&str] = &[

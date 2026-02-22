@@ -1141,3 +1141,33 @@ fn test_no_gitignore_flag() {
     // All files should be indexed despite .gitignore
     assert!(info["indexed_files"].as_u64().unwrap() >= 4);
 }
+
+#[test]
+fn test_worktoolai_is_always_ignored() {
+    let dir = setup_project();
+    let root = dir.path();
+
+    fs::create_dir_all(root.join(".worktoolai/tmp")).unwrap();
+    fs::write(
+        root.join(".worktoolai/tmp/hidden.rs"),
+        "pub fn hidden_fn() -> i32 { 42 }\n",
+    )
+    .unwrap();
+
+    codeai()
+        .arg("index")
+        .current_dir(root)
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["search", "hidden_fn"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+
+    assert!(items.is_empty(), "symbols under .worktoolai must not be indexed");
+}
