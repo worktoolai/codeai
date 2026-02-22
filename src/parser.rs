@@ -8,6 +8,19 @@ const PREVIEW_LINES: usize = 20;
 const MAX_STRINGS: usize = 20;
 const MAX_STRING_LEN: usize = 200;
 
+fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &text[..end]
+}
+
 // ── ExtractedBlock ──
 
 #[derive(Debug, Clone)]
@@ -289,12 +302,7 @@ fn collect_string_nodes(node: Node, source: &[u8], strings: &mut Vec<String>) {
             | "raw_string_literal"
     ) {
         if let Ok(text) = node.utf8_text(source) {
-            let truncated = if text.len() > MAX_STRING_LEN {
-                &text[..MAX_STRING_LEN]
-            } else {
-                text
-            };
-            strings.push(truncated.to_string());
+            strings.push(truncate_utf8(text, MAX_STRING_LEN).to_string());
         }
         return;
     }
@@ -767,5 +775,26 @@ fn normalize_relative_path(base_dir: &str, rel: &str) -> String {
         remaining.to_string()
     } else {
         format!("{}/{remaining}", parts.join("/"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_utf8;
+
+    #[test]
+    fn truncate_utf8_keeps_char_boundary() {
+        let text = format!("{}═suffix", "a".repeat(199));
+        let truncated = truncate_utf8(&text, 200);
+
+        assert_eq!(truncated, "a".repeat(199));
+    }
+
+    #[test]
+    fn truncate_utf8_includes_char_on_boundary() {
+        let text = format!("{}═suffix", "a".repeat(199));
+        let truncated = truncate_utf8(&text, 202);
+
+        assert_eq!(truncated, format!("{}═", "a".repeat(199)));
     }
 }
