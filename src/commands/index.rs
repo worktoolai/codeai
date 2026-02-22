@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::process::Command;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::lang;
@@ -36,7 +38,7 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         search_index.clear_all()?;
     }
 
-    // Scan files
+    // Build scanner for fallback / full indexing
     let mut scanner = Scanner::new(opts.root.clone())
         .no_gitignore(opts.no_gitignore)
         .no_default_ignores(opts.no_default_ignores);
@@ -48,20 +50,82 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         scanner = scanner.ignore_file(ignore.clone());
     }
 
-    let files = scanner.scan()?;
-
-    // Detect deleted files
+    let git_sync = compute_git_sync(&opts.root, &store)?;
     let existing_paths = store.all_file_paths()?;
-    let scanned_paths: std::collections::HashSet<&str> =
-        files.iter().map(|f| f.rel_path.as_str()).collect();
+    let existing_set: HashSet<String> = existing_paths.iter().cloned().collect();
+
+    let filtered_mode = opts.lang_filter.is_some() || opts.path_filter.is_some();
+    let git_mode = !opts.full && !filtered_mode && git_sync.use_git && !git_sync.force_scan;
+    let full_compare_mode = opts.full || (!filtered_mode && !git_mode);
+
+    let mut files = if git_mode {
+        let changed_set = git_sync.changed_paths();
+        if changed_set.is_empty() {
+            Vec::new()
+        } else {
+            scanner
+                .scan()?
+                .into_iter()
+                .filter(|f| changed_set.contains(&f.rel_path))
+                .collect()
+        }
+    } else {
+        scanner.scan()?
+    };
+
+    // Extra path filter (prefix)
+    if let Some(ref pf) = opts.path_filter {
+        let norm = pf.replace('\\', "/").trim_start_matches("./").to_string();
+        files = files
+            .into_iter()
+            .filter(|f| f.rel_path.starts_with(&norm))
+            .collect();
+    }
+
+    let file_map: HashMap<String, crate::scanner::ScanResult> =
+        files.into_iter().map(|f| (f.rel_path.clone(), f)).collect();
+
+    let mut to_delete: HashSet<String> = HashSet::new();
+    let mut to_index: HashSet<String> = HashSet::new();
+
+    if git_mode {
+        // Git-aware sync behavior
+        for p in git_sync.delete_paths.iter() {
+            if existing_set.contains(p) {
+                to_delete.insert(p.clone());
+            }
+        }
+        for p in git_sync.index_paths.iter() {
+            to_index.insert(p.clone());
+        }
+    } else if full_compare_mode {
+        // Full/fallback behavior: compare scan result with DB
+        let scanned_paths: HashSet<String> = file_map.keys().cloned().collect();
+        for ep in &existing_paths {
+            if !scanned_paths.contains(ep) {
+                to_delete.insert(ep.clone());
+            }
+        }
+        for p in file_map.keys() {
+            to_index.insert(p.clone());
+        }
+    } else {
+        // Filtered index mode: only index scanned subset (no global deletes)
+        for p in file_map.keys() {
+            to_index.insert(p.clone());
+        }
+    }
 
     let mut search_writer = search_index.writer()?;
 
-    for ep in &existing_paths {
-        if !scanned_paths.contains(ep.as_str()) {
-            store.delete_file(ep)?;
-            search_index.delete_by_path(&search_writer, ep)?;
+    // Delete removed / renamed-old paths
+    for path in &to_delete {
+        if let Ok(existing_blocks) = store.blocks_for_file(path) {
+            for b in existing_blocks {
+                search_index.delete_by_symbol_id(&search_writer, &b.symbol_id)?;
+            }
         }
+        store.delete_file(path)?;
     }
 
     let mut indexed_files = 0u64;
@@ -69,7 +133,19 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     let mut skipped = 0u64;
     let mut errors = 0u64;
 
-    for file in &files {
+    for path in to_index.iter() {
+        let Some(file) = file_map.get(path) else {
+            // Path no longer exists on disk (e.g. deleted in working tree)
+            if existing_set.contains(path) {
+                if let Ok(existing_blocks) = store.blocks_for_file(path) {
+                    for b in existing_blocks {
+                        search_index.delete_by_symbol_id(&search_writer, &b.symbol_id)?;
+                    }
+                }
+                store.delete_file(path)?;
+            }
+            continue;
+        };
         // Check if file changed
         if let Some(existing) = store.get_file(&file.rel_path)? {
             if existing.mtime == file.mtime && existing.size == file.size {
@@ -106,6 +182,11 @@ pub fn run(opts: IndexOpts) -> Result<()> {
                 skipped += 1;
                 continue;
             }
+        }
+
+        // File content changed: delete existing search docs for this path first
+        for b in store.blocks_for_file(&file.rel_path)? {
+            search_index.delete_by_symbol_id(&search_writer, &b.symbol_id)?;
         }
 
         // Get language config
@@ -161,11 +242,13 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         };
 
         // Build symbol_ids with occurrence tracking
-        let mut name_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut name_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         let mut block_rows = Vec::new();
 
         // First pass: count occurrences
-        let mut occurrence_map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+        let mut occurrence_map: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
         for (i, block) in extracted.iter().enumerate() {
             let key = format!("{}#{}", block.kind, block.name);
             occurrence_map.entry(key).or_default().push(i);
@@ -241,6 +324,11 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     search_writer.commit().context("commit search index")?;
     search_index.reload()?;
 
+    // Persist current git HEAD for next incremental sync (best effort)
+    if let Some(head) = current_git_head(&opts.root) {
+        let _ = store.set_last_indexed_head(&head);
+    }
+
     // Update generation
     let gen = store.next_generation()?;
 
@@ -268,4 +356,168 @@ impl BlockKind {
     fn from_str_loose(s: &str) -> Self {
         s.parse().unwrap_or(BlockKind::Function)
     }
+}
+
+#[derive(Debug, Default)]
+struct GitSyncPlan {
+    use_git: bool,
+    force_scan: bool,
+    index_paths: HashSet<String>,
+    delete_paths: HashSet<String>,
+}
+
+impl GitSyncPlan {
+    fn changed_paths(&self) -> HashSet<String> {
+        self.index_paths
+            .iter()
+            .cloned()
+            .chain(self.delete_paths.iter().cloned())
+            .collect()
+    }
+}
+
+fn compute_git_sync(root: &PathBuf, store: &Store) -> Result<GitSyncPlan> {
+    if !root.join(".git").exists() {
+        let mut plan = GitSyncPlan::default();
+        plan.force_scan = true;
+        return Ok(plan);
+    }
+    let mut plan = GitSyncPlan::default();
+
+    let current_head = current_git_head(root);
+    let Some(current_head) = current_head else {
+        plan.force_scan = true;
+        return Ok(plan);
+    };
+
+    let last_head = store.last_indexed_head()?;
+
+    // Collect working tree changes (staged/unstaged + untracked)
+    let status = git_status_name(root)?;
+    if let Some(lines) = status {
+        for line in lines.lines() {
+            if line.len() < 3 {
+                continue;
+            }
+            let status_code = &line[..2];
+            let rest = line[3..].trim();
+            if rest.is_empty() {
+                continue;
+            }
+
+            if status_code.contains('R') {
+                if let Some((oldp, newp)) = rest.split_once(" -> ") {
+                    plan.delete_paths.insert(normalize_rel_path(oldp));
+                    plan.index_paths.insert(normalize_rel_path(newp));
+                }
+                continue;
+            }
+
+            // D = delete, A/M/T/U/? = index/update path
+            if status_code.contains('D') {
+                plan.delete_paths.insert(normalize_rel_path(rest));
+            } else {
+                plan.index_paths.insert(normalize_rel_path(rest));
+            }
+        }
+    }
+
+    // Collect committed changes since last indexed head
+    if let Some(last) = last_head {
+        if last != current_head {
+            if let Some(lines) = git_diff_name_status(root, &last, &current_head)? {
+                plan.use_git = true;
+                for line in lines.lines() {
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    if parts.is_empty() {
+                        continue;
+                    }
+                    let code = parts[0];
+                    match code.chars().next().unwrap_or('M') {
+                        'D' => {
+                            if parts.len() >= 2 {
+                                plan.delete_paths.insert(normalize_rel_path(parts[1]));
+                            }
+                        }
+                        'R' => {
+                            if parts.len() >= 3 {
+                                plan.delete_paths.insert(normalize_rel_path(parts[1]));
+                                plan.index_paths.insert(normalize_rel_path(parts[2]));
+                            }
+                        }
+                        _ => {
+                            if parts.len() >= 2 {
+                                plan.index_paths.insert(normalize_rel_path(parts[1]));
+                            }
+                        }
+                    }
+                }
+            } else {
+                // If diff fails (e.g., rewritten history), fallback to full scan.
+                plan.force_scan = true;
+            }
+        } else {
+            plan.use_git = true;
+        }
+    } else {
+        // No prior git_head metadata: first run should use full scan.
+        plan.force_scan = true;
+    }
+
+    Ok(plan)
+}
+
+fn current_git_head(root: &PathBuf) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if head.is_empty() {
+        None
+    } else {
+        Some(head)
+    }
+}
+
+fn git_status_name(root: &PathBuf) -> Result<Option<String>> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["status", "--porcelain"])
+        .output();
+
+    let Ok(out) = out else {
+        return Ok(None);
+    };
+    if !out.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&out.stdout).to_string()))
+}
+
+fn git_diff_name_status(root: &PathBuf, from: &str, to: &str) -> Result<Option<String>> {
+    let range = format!("{from}..{to}");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "--name-status", &range])
+        .output();
+
+    let Ok(out) = out else {
+        return Ok(None);
+    };
+    if !out.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&out.stdout).to_string()))
+}
+
+fn normalize_rel_path(path: &str) -> String {
+    path.replace('\\', "/").trim_start_matches("./").to_string()
 }

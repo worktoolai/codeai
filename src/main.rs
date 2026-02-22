@@ -34,10 +34,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Index the codebase
-    #[command(after_help = r#"  codeai index                       # incremental index (skips unchanged)
+    #[command(
+        after_help = r#"  codeai index                       # incremental index (skips unchanged)
   codeai index --full                # full reindex from scratch
   codeai index --lang rust           # only Rust files
-  codeai index --path src/           # only files under src/"#)]
+  codeai index --path src/           # only files under src/"#
+    )]
     Index {
         /// Full reindex (delete existing index first)
         #[arg(long)]
@@ -73,10 +75,12 @@ enum Commands {
     },
 
     /// Search for code blocks
-    #[command(after_help = r#"  codeai search "parse"              # search all blocks
+    #[command(
+        after_help = r#"  codeai search "parse"              # search all blocks
   codeai search "validate" --lang go # only Go blocks
   codeai search "auth" --limit 5     # limit results
-  codeai search "error" --path src/  # only in src/"#)]
+  codeai search "error" --path src/  # only in src/"#
+    )]
     Search {
         /// Search query
         query: String,
@@ -107,10 +111,12 @@ enum Commands {
     },
 
     /// List blocks in a file
-    #[command(after_help = r#"  codeai outline src/main.rs                  # all blocks
+    #[command(
+        after_help = r#"  codeai outline src/main.rs                  # all blocks
   codeai outline src/main.rs --kind function  # functions only
   codeai outline src/main.rs --kind struct    # structs only
-Kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol"#)]
+Kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol"#
+    )]
     Outline {
         /// File path (project-relative)
         path: String,

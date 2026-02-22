@@ -45,7 +45,9 @@ pub fn run(opts: SearchOpts) -> Result<()> {
                     "search",
                     opts.max_bytes,
                     models::ERR_CURSOR_STALE,
-                    format!("Cursor generation {cursor_gen} != current {gen}. Re-query without cursor."),
+                    format!(
+                        "Cursor generation {cursor_gen} != current {gen}. Re-query without cursor."
+                    ),
                     Some(vec![serde_json::json!(["search", {"query": opts.query}])]),
                 );
                 println!("{}", serde_json::to_string(&resp)?);
@@ -72,7 +74,12 @@ pub fn run(opts: SearchOpts) -> Result<()> {
                 .get_block(&h.symbol_id)
                 .ok()
                 .flatten()
-                .map(|b| format!("{}:{}-{}:{}", b.start_line, b.start_col, b.end_line, b.end_col))
+                .map(|b| {
+                    format!(
+                        "{}:{}-{}:{}",
+                        b.start_line, b.start_col, b.end_line, b.end_col
+                    )
+                })
                 .unwrap_or_default();
 
             serde_json::json!([
@@ -91,7 +98,9 @@ pub fn run(opts: SearchOpts) -> Result<()> {
 
     // Add hint for top result
     if let Some(top) = hits.first() {
-        resp.h = Some(vec![serde_json::json!(["open", {"symbol_id": top.symbol_id}])]);
+        resp.h = Some(vec![
+            serde_json::json!(["open", {"symbol_id": top.symbol_id}]),
+        ]);
     }
 
     println!("{}", serde_json::to_string(&resp)?);

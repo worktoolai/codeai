@@ -30,17 +30,22 @@ pub struct Scanner {
 const DEFAULT_MAX_FILE_SIZE: u64 = 1_048_576; // 1MB
 
 const BUILT_IN_IGNORE_DIRS: &[&str] = &[
-    "node_modules", "vendor", ".venv", "__pycache__",
-    "dist", "build", "target", "out",
-    ".git", ".svn", ".hg",
+    "node_modules",
+    "vendor",
+    ".venv",
+    "__pycache__",
+    "dist",
+    "build",
+    "target",
+    "out",
+    ".git",
+    ".svn",
+    ".hg",
 ];
 
 const BUILT_IN_IGNORE_EXTS: &[&str] = &[
-    "min.js", "min.css", "map",
-    "exe", "dll", "so", "dylib",
-    "png", "jpg", "jpeg", "gif", "ico", "svg", "webp",
-    "pdf", "zip", "tar", "gz", "bz2", "xz", "7z",
-    "wasm", "o", "a", "lib", "bin",
+    "min.js", "min.css", "map", "exe", "dll", "so", "dylib", "png", "jpg", "jpeg", "gif", "ico",
+    "svg", "webp", "pdf", "zip", "tar", "gz", "bz2", "xz", "7z", "wasm", "o", "a", "lib", "bin",
 ];
 
 impl Scanner {
@@ -163,9 +168,10 @@ impl Scanner {
             // Built-in extension ignores
             if !self.no_default_ignores {
                 let full_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if BUILT_IN_IGNORE_EXTS.iter().any(|ie| {
-                    full_name.ends_with(&format!(".{ie}"))
-                }) {
+                if BUILT_IN_IGNORE_EXTS
+                    .iter()
+                    .any(|ie| full_name.ends_with(&format!(".{ie}")))
+                {
                     continue;
                 }
             }

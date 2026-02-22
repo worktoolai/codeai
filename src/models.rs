@@ -125,7 +125,12 @@ impl FromStr for BlockKind {
 // ── SymbolId helpers ──
 
 /// Build a symbol_id string: `path#kind#name` or `path#kind#name#N`
-pub fn build_symbol_id(path: &str, kind: &BlockKind, name: &str, occurrence: Option<u32>) -> String {
+pub fn build_symbol_id(
+    path: &str,
+    kind: &BlockKind,
+    name: &str,
+    occurrence: Option<u32>,
+) -> String {
     match occurrence {
         Some(idx) => format!("{path}#{kind}#{name}#{idx}"),
         None => format!("{path}#{kind}#{name}"),
@@ -136,14 +141,29 @@ pub fn build_symbol_id(path: &str, kind: &BlockKind, name: &str, occurrence: Opt
 pub fn parse_symbol_id(id: &str) -> Option<(String, String, String, Option<u32>)> {
     let parts: Vec<&str> = id.splitn(4, '#').collect();
     match parts.len() {
-        3 => Some((parts[0].to_string(), parts[1].to_string(), parts[2].to_string(), None)),
+        3 => Some((
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+            None,
+        )),
         4 => {
             let occ = parts[3].parse::<u32>().ok();
             // If the 4th part isn't a number, treat it as part of name (shouldn't happen)
             if occ.is_some() {
-                Some((parts[0].to_string(), parts[1].to_string(), parts[2].to_string(), occ))
+                Some((
+                    parts[0].to_string(),
+                    parts[1].to_string(),
+                    parts[2].to_string(),
+                    occ,
+                ))
             } else {
-                Some((parts[0].to_string(), parts[1].to_string(), parts[2].to_string(), None))
+                Some((
+                    parts[0].to_string(),
+                    parts[1].to_string(),
+                    parts[2].to_string(),
+                    None,
+                ))
             }
         }
         _ => None,
@@ -184,7 +204,9 @@ pub struct ThinResponse {
 
 impl ThinResponse {
     pub fn success(cmd: &str, max_bytes: u64, items: Vec<serde_json::Value>) -> Self {
-        let byte_count = serde_json::to_string(&items).map(|s| s.len() as u64).unwrap_or(0);
+        let byte_count = serde_json::to_string(&items)
+            .map(|s| s.len() as u64)
+            .unwrap_or(0);
         Self {
             v: 1,
             m: Meta {
@@ -201,7 +223,13 @@ impl ThinResponse {
         }
     }
 
-    pub fn error(cmd: &str, max_bytes: u64, code: &str, message: String, recovery: Option<Vec<serde_json::Value>>) -> Self {
+    pub fn error(
+        cmd: &str,
+        max_bytes: u64,
+        code: &str,
+        message: String,
+        recovery: Option<Vec<serde_json::Value>>,
+    ) -> Self {
         Self {
             v: 1,
             m: Meta {
@@ -259,7 +287,12 @@ mod tests {
 
     #[test]
     fn test_range_display_parse() {
-        let r = Range { start_line: 10, start_col: 0, end_line: 50, end_col: 1 };
+        let r = Range {
+            start_line: 10,
+            start_col: 0,
+            end_line: 50,
+            end_col: 1,
+        };
         assert_eq!(r.to_string(), "10:0-50:1");
         assert_eq!(Range::from_str("10:0-50:1").unwrap(), r);
     }
@@ -267,8 +300,12 @@ mod tests {
     #[test]
     fn test_block_kind_roundtrip() {
         for kind in &[
-            BlockKind::Function, BlockKind::Method, BlockKind::Class,
-            BlockKind::Struct, BlockKind::Interface, BlockKind::Trait,
+            BlockKind::Function,
+            BlockKind::Method,
+            BlockKind::Class,
+            BlockKind::Struct,
+            BlockKind::Interface,
+            BlockKind::Trait,
         ] {
             let s = kind.to_string();
             assert_eq!(&BlockKind::from_str(&s).unwrap(), kind);
@@ -280,12 +317,18 @@ mod tests {
         let id = build_symbol_id("src/main.rs", &BlockKind::Function, "main", None);
         assert_eq!(id, "src/main.rs#function#main");
         let parsed = parse_symbol_id(&id).unwrap();
-        assert_eq!(parsed, ("src/main.rs".into(), "function".into(), "main".into(), None));
+        assert_eq!(
+            parsed,
+            ("src/main.rs".into(), "function".into(), "main".into(), None)
+        );
 
         let id2 = build_symbol_id("lib.rs", &BlockKind::Method, "new", Some(1));
         assert_eq!(id2, "lib.rs#method#new#1");
         let parsed2 = parse_symbol_id(&id2).unwrap();
-        assert_eq!(parsed2, ("lib.rs".into(), "method".into(), "new".into(), Some(1)));
+        assert_eq!(
+            parsed2,
+            ("lib.rs".into(), "method".into(), "new".into(), Some(1))
+        );
     }
 
     #[test]
@@ -303,7 +346,13 @@ mod tests {
 
     #[test]
     fn test_thin_response_error() {
-        let resp = ThinResponse::error("open", 16000, ERR_SYMBOL_NOT_FOUND, "not found".into(), None);
+        let resp = ThinResponse::error(
+            "open",
+            16000,
+            ERR_SYMBOL_NOT_FOUND,
+            "not found".into(),
+            None,
+        );
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["v"], 1);
         assert_eq!(json["e"]["code"], "SYMBOL_NOT_FOUND");

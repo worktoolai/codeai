@@ -51,7 +51,11 @@ pub static PYTHON: LangConfig = LangConfig {
 pub static TYPESCRIPT: LangConfig = LangConfig {
     language: "typescript",
     extensions: &["ts"],
-    function_nodes: &["function_declaration", "method_definition", "arrow_function"],
+    function_nodes: &[
+        "function_declaration",
+        "method_definition",
+        "arrow_function",
+    ],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
 };
@@ -59,7 +63,11 @@ pub static TYPESCRIPT: LangConfig = LangConfig {
 pub static TSX: LangConfig = LangConfig {
     language: "tsx",
     extensions: &["tsx"],
-    function_nodes: &["function_declaration", "method_definition", "arrow_function"],
+    function_nodes: &[
+        "function_declaration",
+        "method_definition",
+        "arrow_function",
+    ],
     class_nodes: &["class_declaration", "interface_declaration"],
     doc_style: DocStyle::BlockComment,
 };
@@ -67,7 +75,11 @@ pub static TSX: LangConfig = LangConfig {
 pub static JAVASCRIPT: LangConfig = LangConfig {
     language: "javascript",
     extensions: &["js", "mjs", "cjs"],
-    function_nodes: &["function_declaration", "method_definition", "arrow_function"],
+    function_nodes: &[
+        "function_declaration",
+        "method_definition",
+        "arrow_function",
+    ],
     class_nodes: &["class_declaration"],
     doc_style: DocStyle::BlockComment,
 };
@@ -75,7 +87,11 @@ pub static JAVASCRIPT: LangConfig = LangConfig {
 pub static JSX: LangConfig = LangConfig {
     language: "jsx",
     extensions: &["jsx"],
-    function_nodes: &["function_declaration", "method_definition", "arrow_function"],
+    function_nodes: &[
+        "function_declaration",
+        "method_definition",
+        "arrow_function",
+    ],
     class_nodes: &["class_declaration"],
     doc_style: DocStyle::BlockComment,
 };
@@ -169,9 +185,24 @@ pub static HCL: LangConfig = LangConfig {
 };
 
 static ALL_CONFIGS: &[&LangConfig] = &[
-    &GO, &RUST, &PYTHON, &TYPESCRIPT, &TSX, &JAVASCRIPT, &JSX,
-    &JAVA, &KOTLIN, &C, &CPP, &CSHARP, &SWIFT, &SCALA,
-    &RUBY, &PHP, &BASH, &HCL,
+    &GO,
+    &RUST,
+    &PYTHON,
+    &TYPESCRIPT,
+    &TSX,
+    &JAVASCRIPT,
+    &JSX,
+    &JAVA,
+    &KOTLIN,
+    &C,
+    &CPP,
+    &CSHARP,
+    &SWIFT,
+    &SCALA,
+    &RUBY,
+    &PHP,
+    &BASH,
+    &HCL,
 ];
 
 // ── Lookup functions ──
@@ -179,7 +210,10 @@ static ALL_CONFIGS: &[&LangConfig] = &[
 /// Get LangConfig by file extension (without dot).
 pub fn config_for_extension(ext: &str) -> Option<&'static LangConfig> {
     let ext_lower = ext.to_lowercase();
-    ALL_CONFIGS.iter().find(|c| c.extensions.contains(&ext_lower.as_str())).copied()
+    ALL_CONFIGS
+        .iter()
+        .find(|c| c.extensions.contains(&ext_lower.as_str()))
+        .copied()
 }
 
 /// Get tree-sitter Language for a file extension.
@@ -204,7 +238,10 @@ pub fn ts_language_for_extension(ext: &str) -> Option<Language> {
 
 /// All supported extensions.
 pub fn all_extensions() -> Vec<&'static str> {
-    ALL_CONFIGS.iter().flat_map(|c| c.extensions.iter().copied()).collect()
+    ALL_CONFIGS
+        .iter()
+        .flat_map(|c| c.extensions.iter().copied())
+        .collect()
 }
 
 /// Check if an extension is supported.

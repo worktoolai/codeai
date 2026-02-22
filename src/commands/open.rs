@@ -77,13 +77,16 @@ fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()
                     }
                     1 => candidates.into_iter().next().unwrap(),
                     _ => {
-                        let candidate_ids: Vec<_> = candidates.iter().map(|c| c.symbol_id.clone()).collect();
+                        let candidate_ids: Vec<_> =
+                            candidates.iter().map(|c| c.symbol_id.clone()).collect();
                         let resp = ThinResponse::error(
                             "open",
                             opts.max_bytes,
                             models::ERR_SYMBOL_AMBIGUOUS,
                             format!("Multiple candidates for '{symbol_id}'"),
-                            Some(vec![serde_json::json!(["open", {"symbols": candidate_ids}])]),
+                            Some(vec![
+                                serde_json::json!(["open", {"symbols": candidate_ids}]),
+                            ]),
                         );
                         println!("{}", serde_json::to_string(&resp)?);
                         return Ok(());
@@ -129,7 +132,12 @@ fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()
             "open",
             opts.max_bytes,
             models::ERR_RANGE_OUT_OF_BOUNDS,
-            format!("Block range {}:{} exceeds file length {}", block.start_line, block.end_line, lines.len()),
+            format!(
+                "Block range {}:{} exceeds file length {}",
+                block.start_line,
+                block.end_line,
+                lines.len()
+            ),
             Some(vec![serde_json::json!(["outline", {"path": block.path}])]),
         );
         println!("{}", serde_json::to_string(&resp)?);
@@ -137,12 +145,19 @@ fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()
     }
 
     let block_content = &lines[start..end];
-    let limited: Vec<&str> = block_content.iter().take(opts.preview_lines).copied().collect();
+    let limited: Vec<&str> = block_content
+        .iter()
+        .take(opts.preview_lines)
+        .copied()
+        .collect();
     let full_content = limited.join("\n");
 
     let (content_str, truncated) = apply_offset(&full_content, opts.offset, opts.max_bytes);
 
-    let range_str = format!("{}:{}-{}:{}", block.start_line, block.start_col, block.end_line, block.end_col);
+    let range_str = format!(
+        "{}:{}-{}:{}",
+        block.start_line, block.start_col, block.end_line, block.end_col
+    );
 
     // open tuple: [symbol_id, name, path, range, signature?, doc?, content_or_preview]
     let item = serde_json::json!([
@@ -195,7 +210,11 @@ fn run_batch_open(opts: &OpenOpts, store: &Store, symbols: &[String]) -> Result<
         }
 
         let block_content = &lines[start..end];
-        let limited: Vec<&str> = block_content.iter().take(opts.preview_lines).copied().collect();
+        let limited: Vec<&str> = block_content
+            .iter()
+            .take(opts.preview_lines)
+            .copied()
+            .collect();
         let full_content = limited.join("\n");
 
         let (content_str, _) = apply_offset(&full_content, opts.offset, opts.max_bytes);
@@ -210,7 +229,10 @@ fn run_batch_open(opts: &OpenOpts, store: &Store, symbols: &[String]) -> Result<
 
         total_bytes += content_bytes;
 
-        let range_str = format!("{}:{}-{}:{}", block.start_line, block.start_col, block.end_line, block.end_col);
+        let range_str = format!(
+            "{}:{}-{}:{}",
+            block.start_line, block.start_col, block.end_line, block.end_col
+        );
 
         items.push(serde_json::json!([
             block.symbol_id,
@@ -278,7 +300,11 @@ fn run_range_open(opts: &OpenOpts) -> Result<()> {
             "open",
             opts.max_bytes,
             models::ERR_RANGE_OUT_OF_BOUNDS,
-            format!("Start line {} exceeds file length {}", start_line, lines.len()),
+            format!(
+                "Start line {} exceeds file length {}",
+                start_line,
+                lines.len()
+            ),
             None,
         );
         println!("{}", serde_json::to_string(&resp)?);

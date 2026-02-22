@@ -143,6 +143,28 @@ fn get_items(resp: &serde_json::Value) -> &Vec<serde_json::Value> {
     resp["i"].as_array().expect("response should have items")
 }
 
+fn git(args: &[&str], cwd: &std::path::Path) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn setup_git_repo(root: &std::path::Path) {
+    git(&["init"], root);
+    git(&["config", "user.email", "test@example.com"], root);
+    git(&["config", "user.name", "Test User"], root);
+    git(&["add", "."], root);
+    git(&["commit", "-m", "initial"], root);
+}
+
 // ── Tests ──
 
 #[test]
@@ -155,7 +177,11 @@ fn test_index_creates_blocks() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "index failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "index failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let resp = parse_response(&output.stdout);
     assert_eq!(resp["v"], 1);
@@ -166,17 +192,28 @@ fn test_index_creates_blocks() {
     let indexed_blocks = info["indexed_blocks"].as_u64().unwrap();
     let total_blocks = info["total_blocks"].as_u64().unwrap();
 
-    assert!(indexed_files >= 4, "should index at least 4 files, got {indexed_files}");
-    assert!(indexed_blocks >= 10, "should find at least 10 blocks, got {indexed_blocks}");
+    assert!(
+        indexed_files >= 4,
+        "should index at least 4 files, got {indexed_files}"
+    );
+    assert!(
+        indexed_blocks >= 10,
+        "should find at least 10 blocks, got {indexed_blocks}"
+    );
     assert_eq!(indexed_blocks, total_blocks);
 }
 
 #[test]
 fn test_index_incremental_skips_unchanged() {
     let dir = setup_project();
+    setup_git_repo(dir.path());
 
     // First index
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Second index — nothing changed
     let output = codeai()
@@ -187,16 +224,28 @@ fn test_index_incremental_skips_unchanged() {
 
     let resp = parse_response(&output.stdout);
     let info = &resp["i"][0];
-    assert_eq!(info["indexed_files"].as_u64().unwrap(), 0, "no files should be re-indexed");
-    assert!(info["total_blocks"].as_u64().unwrap() > 0, "total blocks should persist");
+    assert_eq!(
+        info["indexed_files"].as_u64().unwrap(),
+        0,
+        "no files should be re-indexed"
+    );
+    assert!(
+        info["total_blocks"].as_u64().unwrap() > 0,
+        "total blocks should persist"
+    );
 }
 
 #[test]
 fn test_index_incremental_detects_change() {
     let dir = setup_project();
+    setup_git_repo(dir.path());
 
     // First index
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Modify a file
     fs::write(
@@ -222,15 +271,24 @@ def new_function():
 
     let resp = parse_response(&output.stdout);
     let info = &resp["i"][0];
-    assert_eq!(info["indexed_files"].as_u64().unwrap(), 1, "only modified file should be re-indexed");
+    assert_eq!(
+        info["indexed_files"].as_u64().unwrap(),
+        1,
+        "only modified file should be re-indexed"
+    );
 }
 
 #[test]
 fn test_index_full_reindex() {
     let dir = setup_project();
+    setup_git_repo(dir.path());
 
     // First index
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Full reindex
     let output = codeai()
@@ -241,13 +299,123 @@ fn test_index_full_reindex() {
 
     let resp = parse_response(&output.stdout);
     let info = &resp["i"][0];
-    assert!(info["indexed_files"].as_u64().unwrap() >= 4, "full reindex should re-index all files");
+    assert!(
+        info["indexed_files"].as_u64().unwrap() >= 4,
+        "full reindex should re-index all files"
+    );
+}
+
+#[test]
+fn test_index_incremental_detects_deleted_file_via_git() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Ensure symbol is searchable before deletion
+    let before = codeai()
+        .args(["search", "ValidatePayment"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let before_resp = parse_response(&before.stdout);
+    assert!(
+        !get_items(&before_resp).is_empty(),
+        "symbol should exist before delete"
+    );
+
+    fs::remove_file(dir.path().join("services/payment/validate.go")).unwrap();
+
+    let idx = codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let idx_resp = parse_response(&idx.stdout);
+    let idx_info = &idx_resp["i"][0];
+    assert_eq!(
+        idx_info["indexed_files"].as_u64().unwrap(),
+        0,
+        "delete-only change should not reindex files"
+    );
+
+    let after = codeai()
+        .args(["search", "ValidatePayment"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let after_resp = parse_response(&after.stdout);
+    let after_items = get_items(&after_resp);
+    assert!(
+        !after_items
+            .iter()
+            .any(|i| i[2].as_str().unwrap_or("").contains("validate.go")),
+        "deleted file should be removed from search index"
+    );
+}
+
+#[test]
+fn test_index_incremental_detects_rename_via_git() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    fs::rename(
+        dir.path().join("utils/helpers.py"),
+        dir.path().join("utils/helpers2.py"),
+    )
+    .unwrap();
+
+    let idx = codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let idx_resp = parse_response(&idx.stdout);
+    let idx_info = &idx_resp["i"][0];
+    assert_eq!(
+        idx_info["indexed_files"].as_u64().unwrap(),
+        1,
+        "rename should index new path once"
+    );
+
+    let old_outline = codeai()
+        .args(["outline", "utils/helpers.py"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let old_resp = parse_response(&old_outline.stdout);
+    assert_eq!(old_resp["e"]["code"].as_str().unwrap(), "FILE_NOT_FOUND");
+
+    let new_outline = codeai()
+        .args(["outline", "utils/helpers2.py"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let new_resp = parse_response(&new_outline.stdout);
+    assert!(
+        !get_items(&new_resp).is_empty(),
+        "renamed file should be indexed at new path"
+    );
 }
 
 #[test]
 fn test_search_finds_by_name() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["search", "ValidatePayment", "--limit", "5"])
@@ -268,7 +436,11 @@ fn test_search_finds_by_name() {
 #[test]
 fn test_search_finds_by_string_literal() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["search", "payment validation failed"])
@@ -280,7 +452,10 @@ fn test_search_finds_by_string_literal() {
     let resp = parse_response(&output.stdout);
     let items = get_items(&resp);
 
-    assert!(!items.is_empty(), "should find blocks containing the error string");
+    assert!(
+        !items.is_empty(),
+        "should find blocks containing the error string"
+    );
     // Should find the validate.go file
     let paths: Vec<&str> = items.iter().filter_map(|i| i[2].as_str()).collect();
     assert!(paths.iter().any(|p| p.contains("validate.go")));
@@ -289,7 +464,11 @@ fn test_search_finds_by_string_literal() {
 #[test]
 fn test_search_with_path_filter() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["search", "parse", "--path", "utils"])
@@ -304,7 +483,10 @@ fn test_search_with_path_filter() {
     // All results should be in utils/
     for item in items {
         let path = item[2].as_str().unwrap();
-        assert!(path.contains("utils"), "result path should contain 'utils': {path}");
+        assert!(
+            path.contains("utils"),
+            "result path should contain 'utils': {path}"
+        );
     }
 }
 
@@ -326,7 +508,11 @@ fn test_search_empty_index() {
 #[test]
 fn test_search_has_hints() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["search", "gcd"])
@@ -347,7 +533,11 @@ fn test_search_has_hints() {
 #[test]
 fn test_outline_lists_blocks() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["outline", "services/payment/validate.go"])
@@ -361,8 +551,14 @@ fn test_outline_lists_blocks() {
 
     // Should find ValidatePayment and ProcessPayment
     let names: Vec<&str> = items.iter().filter_map(|i| i[1].as_str()).collect();
-    assert!(names.contains(&"ValidatePayment"), "should contain ValidatePayment: {names:?}");
-    assert!(names.contains(&"ProcessPayment"), "should contain ProcessPayment: {names:?}");
+    assert!(
+        names.contains(&"ValidatePayment"),
+        "should contain ValidatePayment: {names:?}"
+    );
+    assert!(
+        names.contains(&"ProcessPayment"),
+        "should contain ProcessPayment: {names:?}"
+    );
 
     // outline tuple: [symbol_id, name, kind, path, range]
     for item in items {
@@ -377,7 +573,11 @@ fn test_outline_lists_blocks() {
 #[test]
 fn test_outline_file_not_found() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["outline", "nonexistent/file.go"])
@@ -393,7 +593,11 @@ fn test_outline_file_not_found() {
 #[test]
 fn test_outline_kind_filter() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["outline", "utils/helpers.py", "--kind", "class"])
@@ -406,14 +610,22 @@ fn test_outline_kind_filter() {
     let items = get_items(&resp);
 
     for item in items {
-        assert_eq!(item[2].as_str().unwrap(), "class", "kind filter should only return classes");
+        assert_eq!(
+            item[2].as_str().unwrap(),
+            "class",
+            "kind filter should only return classes"
+        );
     }
 }
 
 #[test]
 fn test_open_single_symbol() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // First get the symbol_id from outline
     let outline_out = codeai()
@@ -444,13 +656,20 @@ fn test_open_single_symbol() {
     assert!(item[2].as_str().unwrap().contains("validate.go"));
     // Content should contain actual source code
     let content = item[6].as_str().unwrap();
-    assert!(content.contains("func"), "content should contain source code");
+    assert!(
+        content.contains("func"),
+        "content should contain source code"
+    );
 }
 
 #[test]
 fn test_open_symbol_not_found() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["open", "--symbol", "nonexistent.go#function#foo"])
@@ -468,7 +687,11 @@ fn test_open_symbol_not_found() {
 #[test]
 fn test_open_batch() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Get symbol IDs from outline
     let outline_out = codeai()
@@ -518,7 +741,10 @@ fn test_open_range() {
     assert_eq!(items.len(), 1);
 
     let content = items[0][6].as_str().unwrap();
-    assert!(content.contains("ValidatePayment"), "range should capture function body");
+    assert!(
+        content.contains("ValidatePayment"),
+        "range should capture function body"
+    );
 }
 
 #[test]
@@ -539,13 +765,14 @@ fn test_open_range_file_not_found() {
 #[test]
 fn test_output_schema_version() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // All commands should include v=1
-    for args in [
-        vec!["search", "gcd"],
-        vec!["outline", "utils/math.rs"],
-    ] {
+    for args in [vec!["search", "gcd"], vec!["outline", "utils/math.rs"]] {
         let output = codeai()
             .args(&args)
             .current_dir(dir.path())
@@ -559,7 +786,11 @@ fn test_output_schema_version() {
 #[test]
 fn test_meta_tuple_format() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["search", "gcd"])
@@ -576,13 +807,20 @@ fn test_meta_tuple_format() {
     assert!(meta[1].is_u64(), "max_bytes should be u64");
     assert!(meta[2].is_u64(), "byte_count should be u64");
     assert!(meta[3].as_u64().unwrap() <= 1, "truncated should be 0 or 1");
-    assert!(meta[4].is_null(), "next_cursor should be null when not paginating");
+    assert!(
+        meta[4].is_null(),
+        "next_cursor should be null when not paginating"
+    );
 }
 
 #[test]
 fn test_multilang_index() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Verify each language file was indexed
     for (path, expected_name) in [
@@ -610,7 +848,11 @@ fn test_multilang_index() {
 #[test]
 fn test_js_arrow_function_name() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["outline", "utils/format.js"])
@@ -631,7 +873,11 @@ fn test_js_arrow_function_name() {
 #[test]
 fn test_python_class_and_methods() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     let output = codeai()
         .args(["outline", "utils/helpers.py"])
@@ -648,11 +894,15 @@ fn test_python_class_and_methods() {
         .collect();
 
     assert!(
-        kinds_names.iter().any(|(k, n)| *k == "class" && *n == "ConfigManager"),
+        kinds_names
+            .iter()
+            .any(|(k, n)| *k == "class" && *n == "ConfigManager"),
         "should find class ConfigManager: {kinds_names:?}"
     );
     assert!(
-        kinds_names.iter().any(|(k, n)| *k == "function" && *n == "parse_config"),
+        kinds_names
+            .iter()
+            .any(|(k, n)| *k == "function" && *n == "parse_config"),
         "should find function parse_config: {kinds_names:?}"
     );
 }
@@ -660,7 +910,11 @@ fn test_python_class_and_methods() {
 #[test]
 fn test_search_then_open_roundtrip() {
     let dir = setup_project();
-    codeai().arg("index").current_dir(dir.path()).assert().success();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
 
     // Search
     let search_out = codeai()
@@ -685,7 +939,10 @@ fn test_search_then_open_roundtrip() {
     assert_eq!(open_items.len(), 1);
 
     let content = open_items[0][6].as_str().unwrap();
-    assert!(content.contains("gcd"), "opened content should contain 'gcd'");
+    assert!(
+        content.contains("gcd"),
+        "opened content should contain 'gcd'"
+    );
 }
 
 #[test]
@@ -697,11 +954,7 @@ fn test_gitignore_respected() {
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::write(root.join(".gitignore"), "utils/\n").unwrap();
 
-    let output = codeai()
-        .arg("index")
-        .current_dir(root)
-        .output()
-        .unwrap();
+    let output = codeai().arg("index").current_dir(root).output().unwrap();
 
     let resp = parse_response(&output.stdout);
     let info = &resp["i"][0];

@@ -111,6 +111,34 @@ impl Store {
         Ok(gen)
     }
 
+    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("get_meta")
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn last_indexed_head(&self) -> Result<Option<String>> {
+        self.get_meta("git_head")
+    }
+
+    pub fn set_last_indexed_head(&self, head: &str) -> Result<()> {
+        self.set_meta("git_head", head)
+    }
+
     // ── Files ──
 
     pub fn get_file(&self, path: &str) -> Result<Option<FileMeta>> {
@@ -152,8 +180,10 @@ impl Store {
     }
 
     pub fn delete_file(&self, path: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM blocks WHERE path = ?1", params![path])?;
-        self.conn.execute("DELETE FROM files WHERE path = ?1", params![path])?;
+        self.conn
+            .execute("DELETE FROM blocks WHERE path = ?1", params![path])?;
+        self.conn
+            .execute("DELETE FROM files WHERE path = ?1", params![path])?;
         Ok(())
     }
 

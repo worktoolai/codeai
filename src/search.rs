@@ -121,6 +121,12 @@ impl SearchIndex {
         Ok(())
     }
 
+    pub fn delete_by_symbol_id(&self, writer: &IndexWriter, symbol_id: &str) -> Result<()> {
+        let term = tantivy::Term::from_field_text(self.f_symbol_id, symbol_id);
+        writer.delete_term(term);
+        Ok(())
+    }
+
     pub fn search(
         &self,
         query_str: &str,
@@ -181,13 +187,19 @@ impl SearchIndex {
             if get_text(&doc, self.f_doc).to_lowercase().contains(&q_lower) {
                 matched_fields.push("doc".to_string());
             }
-            if get_text(&doc, self.f_strings).to_lowercase().contains(&q_lower) {
+            if get_text(&doc, self.f_strings)
+                .to_lowercase()
+                .contains(&q_lower)
+            {
                 matched_fields.push("str".to_string());
             }
             if path.to_lowercase().contains(&q_lower) {
                 matched_fields.push("path".to_string());
             }
-            if get_text(&doc, self.f_signature).to_lowercase().contains(&q_lower) {
+            if get_text(&doc, self.f_signature)
+                .to_lowercase()
+                .contains(&q_lower)
+            {
                 matched_fields.push("sig".to_string());
             }
             if matched_fields.is_empty() {

@@ -72,7 +72,10 @@ pub fn run(opts: OutlineOpts) -> Result<()> {
                 b.name,
                 b.kind,
                 b.path,
-                format!("{}:{}-{}:{}", b.start_line, b.start_col, b.end_line, b.end_col),
+                format!(
+                    "{}:{}-{}:{}",
+                    b.start_line, b.start_col, b.end_line, b.end_col
+                ),
             ])
         })
         .collect();

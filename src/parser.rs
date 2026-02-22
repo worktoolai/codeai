@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tree_sitter::{Language, Parser, Node};
+use tree_sitter::{Language, Node, Parser};
 
 const PREVIEW_LINES: usize = 20;
 const MAX_STRINGS: usize = 20;
@@ -108,11 +108,27 @@ fn collect_blocks(
 
             // If it's a class-like node, recurse into it for methods
             if class_nodes.contains(&kind) {
-                collect_blocks(child, source, lines, target_nodes, class_nodes, blocks, depth + 1);
+                collect_blocks(
+                    child,
+                    source,
+                    lines,
+                    target_nodes,
+                    class_nodes,
+                    blocks,
+                    depth + 1,
+                );
             }
         } else {
             // Recurse into non-target nodes to find nested targets
-            collect_blocks(child, source, lines, target_nodes, class_nodes, blocks, depth + 1);
+            collect_blocks(
+                child,
+                source,
+                lines,
+                target_nodes,
+                class_nodes,
+                blocks,
+                depth + 1,
+            );
         }
     }
 }
@@ -192,10 +208,7 @@ fn extract_name(node: Node, source: &[u8]) -> String {
 fn extract_signature(node: Node, source: &[u8]) -> Option<String> {
     let text = node.utf8_text(source).ok()?;
     // Take up to the first '{', ':', or newline
-    let sig = text
-        .lines()
-        .next()
-        .unwrap_or(text);
+    let sig = text.lines().next().unwrap_or(text);
 
     // If the first line has '{', take up to it
     let sig = if let Some(pos) = sig.find('{') {
@@ -240,7 +253,9 @@ fn extract_doc(node: Node, source: &[u8]) -> Option<String> {
 // ── Preview extraction ──
 
 fn extract_preview(start_line: usize, end_line: usize, lines: &[&str]) -> String {
-    let end = (start_line + PREVIEW_LINES).min(end_line + 1).min(lines.len());
+    let end = (start_line + PREVIEW_LINES)
+        .min(end_line + 1)
+        .min(lines.len());
     if start_line >= lines.len() {
         return String::new();
     }
