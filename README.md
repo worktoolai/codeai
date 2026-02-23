@@ -66,6 +66,7 @@ codeai search "authenticate user"
 codeai outline src/auth/handler.go
 codeai open --symbol "src/auth/handler.go#function#AuthenticateUser"
 codeai graph src/main.rs
+codeai project get --fmt thin
 ```
 
 ## Commands
@@ -146,6 +147,11 @@ codeai graph src/main.rs --fmt thin --limit 10
 codeai graph src/main.rs --fmt thin --limit 10 --offset 10
 ```
 
+Validation behavior:
+
+- `--fmt` accepts only `tree|thin` (`PARSE_ERROR` on invalid values)
+- `--depth`, `--limit`, `--max-bytes` must be greater than `0`
+
 Tree output:
 ```
 src/main.rs
@@ -176,6 +182,26 @@ Thin JSON output (`--fmt thin`):
   ]
 }
 ```
+
+### `codeai project get`
+
+Infer entrypoint-based project structure from indexed imports.
+
+```bash
+codeai project get --fmt thin
+```
+
+Returns 4 top-level items in `i`:
+
+1. summary object (`total_files`, `entrypoints`, `shared`, `orphan`)
+2. entrypoint array (`path`, `confidence`, `file_count`, `files`)
+3. shared file array
+4. orphan file array
+
+Validation behavior:
+
+- `--fmt` accepts only `thin` (`PARSE_ERROR` on invalid values)
+- `--max-bytes` must be greater than `0`
 
 ## Output Format
 
