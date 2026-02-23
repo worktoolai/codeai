@@ -5,6 +5,7 @@ use crate::models::{self, ThinResponse};
 use crate::search::SearchIndex;
 use crate::store::Store;
 
+use super::{validate_lang_filter, validate_nonzero};
 pub struct SearchOpts {
     pub root: PathBuf,
     pub query: String,
@@ -17,6 +18,44 @@ pub struct SearchOpts {
 }
 
 pub fn run(opts: SearchOpts) -> Result<()> {
+    if let Err(message) = validate_nonzero("limit", opts.limit as u64) {
+        let resp = ThinResponse::error(
+            "search",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Err(message) = validate_nonzero("max-bytes", opts.max_bytes) {
+        let resp = ThinResponse::error(
+            "search",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Some(ref lang) = opts.lang_filter {
+        if !validate_lang_filter(lang) {
+            let resp = ThinResponse::error(
+                "search",
+                opts.max_bytes,
+                models::ERR_UNSUPPORTED_LANGUAGE,
+                format!("unsupported language filter '{lang}'"),
+                None,
+            );
+            println!("{}", serde_json::to_string(&resp)?);
+            return Ok(());
+        }
+    }
+
     let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
     let search_dir = codeai_dir.join("search");

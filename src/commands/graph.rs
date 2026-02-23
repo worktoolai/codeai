@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crate::models;
 use crate::store::Store;
 
+use super::{validate_fmt, validate_nonzero};
 pub struct GraphOpts {
     pub root: PathBuf,
     pub path: String,
@@ -33,6 +34,54 @@ struct GraphResult {
 }
 
 pub fn run(opts: GraphOpts) -> Result<()> {
+    if let Err(message) = validate_fmt(&opts.fmt, &["tree", "thin"]) {
+        let resp = models::ThinResponse::error(
+            "graph",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Err(message) = validate_nonzero("depth", opts.depth as u64) {
+        let resp = models::ThinResponse::error(
+            "graph",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Err(message) = validate_nonzero("limit", opts.limit as u64) {
+        let resp = models::ThinResponse::error(
+            "graph",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Err(message) = validate_nonzero("max-bytes", opts.max_bytes) {
+        let resp = models::ThinResponse::error(
+            "graph",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
     let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
 
@@ -86,13 +135,19 @@ pub fn run(opts: GraphOpts) -> Result<()> {
 
     match opts.fmt.as_str() {
         "thin" => print_thin(&graph, &opts)?,
-        _ => print_tree(&graph, &opts)?,
+        "tree" => print_tree(&graph, &opts)?,
+        _ => unreachable!("fmt is pre-validated"),
     }
 
     Ok(())
 }
 
-fn build_graph(store: &Store, entry: &str, max_depth: usize, include_external: bool) -> Result<GraphResult> {
+fn build_graph(
+    store: &Store,
+    entry: &str,
+    max_depth: usize,
+    include_external: bool,
+) -> Result<GraphResult> {
     let mut edges = Vec::new();
     let mut visited = HashSet::new();
     let mut files = HashSet::new();
@@ -214,6 +269,7 @@ fn edges_by_source(edges: &[Edge]) -> std::collections::HashMap<String, Vec<Tree
     map
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_tree_node(
     path: &str,
     prefix: &str,
@@ -253,9 +309,7 @@ fn render_tree_node(
         if *node_count >= offset {
             match &child.target {
                 Some(target) => {
-                    if child.kind == "cycle" {
-                        output.push_str(&format!("{prefix}{connector}{target} (cycle)\n"));
-                    } else if visited.contains(target) {
+                    if child.kind == "cycle" || visited.contains(target) {
                         output.push_str(&format!("{prefix}{connector}{target} (cycle)\n"));
                     } else {
                         output.push_str(&format!("{prefix}{connector}{target}\n"));
@@ -302,14 +356,7 @@ fn print_thin(graph: &GraphResult, opts: &GraphOpts) -> Result<()> {
         .iter()
         .skip(opts.offset)
         .take(opts.limit)
-        .map(|e| {
-            serde_json::json!([
-                e.from,
-                e.to,
-                e.raw_import,
-                e.kind,
-            ])
-        })
+        .map(|e| serde_json::json!([e.from, e.to, e.raw_import, e.kind,]))
         .collect();
 
     let truncated = opts.offset + opts.limit < graph.edges.len();

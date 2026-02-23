@@ -15,12 +15,13 @@ use std::path::PathBuf;
 #[command(
     name = "codeai",
     about = "Agent-first code exploration",
-    after_help = r#"Workflow: index → search/outline/graph → open
+    after_help = r#"Workflow: index → search/outline/graph/project → open
   index                  build/update block index (auto-skips unchanged files)
   search QUERY           full-text + semantic search across blocks
   outline PATH           list blocks in a file (functions, structs, etc.)
   open --symbol ID       read block content by symbol ID
   graph PATH             show import/dependency graph from entry file
+  project get            infer entrypoint-based project structure
 Symbol ID: path#kind#name (e.g. "src/main.rs#function#main")
 Block kinds: function, method, class, struct, interface, trait, enum, impl, module, namespace, block, object, protocol
 Languages: go, rust, python, typescript, tsx, javascript, jsx, java, kotlin, c, cpp, csharp, swift, scala, ruby, php, bash, hcl
@@ -34,6 +35,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Infer project structure from index graph
+    #[command(subcommand)]
+    Project(ProjectCommands),
+
     /// Index the codebase
     #[command(
         after_help = r#"  codeai index                       # incremental index (skips unchanged)
@@ -220,12 +225,37 @@ Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
     },
 }
 
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// Infer entrypoint-based project structure
+    #[command(after_help = r#"  codeai project get
+  codeai project get --fmt thin
+Output: inferred-only graph/path structure (no project.json overrides)"#)]
+    Get {
+        /// Max output bytes
+        #[arg(long, default_value = "12000")]
+        max_bytes: u64,
+
+        /// Output format: thin
+        #[arg(long, default_value = "thin")]
+        fmt: String,
+    },
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let result = match cli.command {
+        Commands::Project(ProjectCommands::Get { max_bytes, fmt }) => {
+            commands::project::run(commands::project::ProjectOpts {
+                root,
+                max_bytes,
+                fmt,
+            })
+        }
+
         Commands::Index {
             full,
             path,

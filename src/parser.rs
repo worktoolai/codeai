@@ -479,14 +479,9 @@ fn extract_c_include(node: Node, source: &[u8], imports: &mut Vec<ExtractedImpor
                 .trim_matches(|c| c == '"' || c == '<' || c == '>')
                 .to_string();
             if !raw.is_empty() {
-                let kind = if text.starts_with('<') {
-                    "include"
-                } else {
-                    "include"
-                };
                 imports.push(ExtractedImport {
                     raw_import: raw,
-                    kind: kind.to_string(),
+                    kind: "include".to_string(),
                 });
             }
         }
@@ -505,9 +500,7 @@ fn extract_ruby_require(node: Node, source: &[u8], imports: &mut Vec<ExtractedIm
                 for child in args.children(&mut cursor) {
                     if child.kind().contains("string") {
                         if let Ok(text) = child.utf8_text(source) {
-                            let raw = text
-                                .trim_matches(|c| c == '\'' || c == '"')
-                                .to_string();
+                            let raw = text.trim_matches(|c| c == '\'' || c == '"').to_string();
                             if !raw.is_empty() {
                                 imports.push(ExtractedImport {
                                     raw_import: raw,
@@ -536,9 +529,7 @@ fn extract_bash_source(node: Node, source: &[u8], imports: &mut Vec<ExtractedImp
                         continue;
                     }
                     if let Ok(text) = child.utf8_text(source) {
-                        let raw = text
-                            .trim_matches(|c| c == '\'' || c == '"')
-                            .to_string();
+                        let raw = text.trim_matches(|c| c == '\'' || c == '"').to_string();
                         if !raw.is_empty() {
                             imports.push(ExtractedImport {
                                 raw_import: raw,
@@ -650,23 +641,26 @@ fn resolve_python_import(raw: &str, all_paths: &HashSet<String>) -> Option<Strin
     None
 }
 
-fn resolve_js_import(
-    raw: &str,
-    source_path: &str,
-    all_paths: &HashSet<String>,
-) -> Option<String> {
+fn resolve_js_import(raw: &str, source_path: &str, all_paths: &HashSet<String>) -> Option<String> {
     if !raw.starts_with('.') {
         return None; // external package
     }
 
-    let source_dir = source_path
-        .rsplit_once('/')
-        .map(|(d, _)| d)
-        .unwrap_or("");
+    let source_dir = source_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
 
     let resolved = normalize_relative_path(source_dir, raw);
 
-    let extensions = &["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
+    let extensions = &[
+        "",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        "/index.ts",
+        "/index.tsx",
+        "/index.js",
+        "/index.jsx",
+    ];
     for ext in extensions {
         let candidate = format!("{resolved}{ext}");
         if all_paths.contains(&candidate) {
@@ -692,16 +686,9 @@ fn resolve_java_import_path(raw: &str, all_paths: &HashSet<String>) -> Option<St
     None
 }
 
-fn resolve_c_import(
-    raw: &str,
-    source_path: &str,
-    all_paths: &HashSet<String>,
-) -> Option<String> {
+fn resolve_c_import(raw: &str, source_path: &str, all_paths: &HashSet<String>) -> Option<String> {
     // Try relative to source file
-    let source_dir = source_path
-        .rsplit_once('/')
-        .map(|(d, _)| d)
-        .unwrap_or("");
+    let source_dir = source_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
 
     let relative = if source_dir.is_empty() {
         raw.to_string()
@@ -727,10 +714,7 @@ fn resolve_relative_import(
     extensions: &[&str],
     all_paths: &HashSet<String>,
 ) -> Option<String> {
-    let source_dir = source_path
-        .rsplit_once('/')
-        .map(|(d, _)| d)
-        .unwrap_or("");
+    let source_dir = source_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
 
     let resolved = normalize_relative_path(source_dir, raw);
 

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::models::{self, parse_symbol_id, ThinResponse};
 use crate::store::Store;
 
+use super::validate_nonzero;
 pub struct OpenOpts {
     pub root: PathBuf,
     pub symbol: Option<String>,
@@ -18,6 +19,33 @@ pub struct OpenOpts {
 pub fn run(opts: OpenOpts) -> Result<()> {
     let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     let db_path = codeai_dir.join("index.db");
+
+    if let Err(message) = validate_nonzero("max-bytes", opts.max_bytes) {
+        let resp = ThinResponse::error(
+            "open",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    let target_count = u8::from(opts.symbol.is_some())
+        + u8::from(opts.symbols.is_some())
+        + u8::from(opts.range.is_some());
+    if target_count != 1 {
+        let resp = ThinResponse::error(
+            "open",
+            opts.max_bytes,
+            "INVALID_ARGS",
+            "Provide exactly one of --symbol, --symbols, or --range".into(),
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
 
     if opts.range.is_some() {
         return run_range_open(&opts);
@@ -45,15 +73,7 @@ pub fn run(opts: OpenOpts) -> Result<()> {
         return run_batch_open(&opts, &store, symbols);
     }
 
-    let resp = ThinResponse::error(
-        "open",
-        opts.max_bytes,
-        "INVALID_ARGS",
-        "Provide --symbol, --symbols, or --range".into(),
-        None,
-    );
-    println!("{}", serde_json::to_string(&resp)?);
-    Ok(())
+    unreachable!("target args are pre-validated");
 }
 
 fn run_single_open(opts: &OpenOpts, store: &Store, symbol_id: &str) -> Result<()> {

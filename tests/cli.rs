@@ -1006,6 +1006,132 @@ fn test_gitignore_respected() {
     assert_eq!(info["indexed_files"].as_u64().unwrap(), 4);
 }
 
+#[test]
+fn test_graph_invalid_fmt_returns_parse_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["graph", "src/main.rs", "--fmt", "bad"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "PARSE_ERROR");
+}
+
+#[test]
+fn test_outline_invalid_kind_returns_parse_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["outline", "src/main.rs", "--kind", "badkind"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "PARSE_ERROR");
+}
+
+#[test]
+fn test_index_invalid_lang_returns_unsupported_language() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["index", "--lang", "badlang"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "UNSUPPORTED_LANGUAGE");
+}
+
+#[test]
+fn test_search_invalid_lang_returns_unsupported_language() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["search", "parse", "--lang", "badlang"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "UNSUPPORTED_LANGUAGE");
+}
+
+#[test]
+fn test_search_limit_zero_returns_parse_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["search", "parse", "--limit", "0"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "PARSE_ERROR");
+}
+
+#[test]
+fn test_index_max_bytes_zero_returns_parse_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["index", "--max-bytes", "0"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "PARSE_ERROR");
+}
+
+#[test]
+fn test_open_without_target_returns_invalid_args() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .arg("open")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "INVALID_ARGS");
+}
+
+#[test]
+fn test_open_with_conflicting_targets_returns_invalid_args() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args([
+            "open",
+            "--symbol",
+            "src/main.rs#function#main",
+            "--range",
+            "src/main.rs:0:0-1:0",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "INVALID_ARGS");
+}
+
 // ── Graph tests ──
 
 #[test]
@@ -1069,8 +1195,14 @@ fn test_graph_thin_output() {
     // i[0] = summary object
     let summary = &resp["i"][0];
     assert_eq!(summary["entry"], "src/main.rs");
-    assert!(summary["files"].as_u64().unwrap() >= 2, "should have at least 2 files");
-    assert!(summary["edges"].as_u64().unwrap() >= 2, "should have at least 2 internal edges");
+    assert!(
+        summary["files"].as_u64().unwrap() >= 2,
+        "should have at least 2 files"
+    );
+    assert!(
+        summary["edges"].as_u64().unwrap() >= 2,
+        "should have at least 2 internal edges"
+    );
 
     // external imports are excluded by default
     assert_eq!(summary["external"].as_u64().unwrap(), 1);
@@ -1090,7 +1222,9 @@ fn test_graph_thin_output() {
     }
 
     assert!(
-        edges.iter().all(|edge| edge.as_array().unwrap()[1].is_string()),
+        edges
+            .iter()
+            .all(|edge| edge.as_array().unwrap()[1].is_string()),
         "default graph output should not include external edges"
     );
 }
@@ -1138,7 +1272,9 @@ fn test_graph_external_flag_includes_external_edges() {
 
     let edges = resp["i"][1].as_array().unwrap();
     assert!(
-        edges.iter().any(|edge| edge.as_array().unwrap()[1].is_null()),
+        edges
+            .iter()
+            .any(|edge| edge.as_array().unwrap()[1].is_null()),
         "--external should include external edges"
     );
 }
@@ -1156,6 +1292,130 @@ fn test_graph_empty_index() {
     assert!(output.status.success());
     let resp = parse_response(&output.stdout);
     assert_eq!(resp["e"]["code"].as_str().unwrap(), "INDEX_EMPTY");
+}
+
+// ── Project tests ──
+
+#[test]
+fn test_project_get_empty_index() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = codeai()
+        .args(["project", "get"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(resp["e"]["code"].as_str().unwrap(), "INDEX_EMPTY");
+}
+
+#[test]
+fn test_project_get_detects_entrypoint_main_rs() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["project", "get", "--fmt", "thin"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    let entrypoints = resp["i"][1].as_array().unwrap();
+    assert!(
+        entrypoints
+            .iter()
+            .any(|ep| ep["path"].as_str() == Some("src/main.rs")),
+        "entrypoint list should include src/main.rs"
+    );
+}
+
+#[test]
+fn test_project_get_classifies_reachable_and_orphan() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["project", "get", "--fmt", "thin"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    let entrypoints = resp["i"][1].as_array().unwrap();
+    let main_entry = entrypoints
+        .iter()
+        .find(|ep| ep["path"].as_str() == Some("src/main.rs"))
+        .expect("src/main.rs entrypoint should exist");
+
+    let files = main_entry["files"].as_array().unwrap();
+    assert!(
+        files.iter().any(|f| f.as_str() == Some("src/models.rs")),
+        "src/models.rs should be reachable from src/main.rs"
+    );
+    assert!(
+        files.iter().any(|f| f.as_str() == Some("src/store.rs")),
+        "src/store.rs should be reachable from src/main.rs"
+    );
+
+    let orphan = resp["i"][3].as_array().unwrap();
+    assert!(
+        orphan
+            .iter()
+            .any(|f| f.as_str() == Some("utils/helpers.py")),
+        "utils/helpers.py should be classified as orphan"
+    );
+    assert!(
+        orphan.iter().any(|f| f.as_str() == Some("utils/math.rs")),
+        "utils/math.rs should be classified as orphan"
+    );
+}
+
+#[test]
+fn test_project_get_response_schema() {
+    let dir = setup_project();
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let output = codeai()
+        .args(["project", "get", "--fmt", "thin"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    assert_eq!(resp["v"], 1);
+    assert_eq!(resp["m"][0], "project.get");
+
+    let items = resp["i"].as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        4,
+        "project.get should return 4 top-level i items"
+    );
+    assert!(items[0].is_object(), "i[0] should be summary object");
+    assert!(items[1].is_array(), "i[1] should be entrypoint array");
+    assert!(items[2].is_array(), "i[2] should be shared array");
+    assert!(items[3].is_array(), "i[3] should be orphan array");
 }
 
 #[test]
@@ -1242,11 +1502,7 @@ fn test_worktoolai_is_always_ignored() {
     )
     .unwrap();
 
-    codeai()
-        .arg("index")
-        .current_dir(root)
-        .assert()
-        .success();
+    codeai().arg("index").current_dir(root).assert().success();
 
     let output = codeai()
         .args(["search", "hidden_fn"])
@@ -1257,5 +1513,8 @@ fn test_worktoolai_is_always_ignored() {
     let resp = parse_response(&output.stdout);
     let items = get_items(&resp);
 
-    assert!(items.is_empty(), "symbols under .worktoolai must not be indexed");
+    assert!(
+        items.is_empty(),
+        "symbols under .worktoolai must not be indexed"
+    );
 }

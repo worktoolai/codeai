@@ -11,6 +11,7 @@ use crate::scanner::Scanner;
 use crate::search::{SearchDoc, SearchIndex};
 use crate::store::{BlockRow, FileMeta, ImportRow, Store};
 
+use super::{validate_lang_filter, validate_nonzero};
 const IMPORTS_BACKFILL_META_KEY: &str = "imports_backfill_v1_done";
 
 pub struct IndexOpts {
@@ -26,6 +27,32 @@ pub struct IndexOpts {
 }
 
 pub fn run(opts: IndexOpts) -> Result<()> {
+    if let Err(message) = validate_nonzero("max-bytes", opts.max_bytes) {
+        let resp = models::ThinResponse::error(
+            "index",
+            opts.max_bytes,
+            models::ERR_PARSE_ERROR,
+            message,
+            None,
+        );
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
+
+    if let Some(ref lang) = opts.lang_filter {
+        if !validate_lang_filter(lang) {
+            let resp = models::ThinResponse::error(
+                "index",
+                opts.max_bytes,
+                models::ERR_UNSUPPORTED_LANGUAGE,
+                format!("unsupported language filter '{lang}'"),
+                None,
+            );
+            println!("{}", serde_json::to_string(&resp)?);
+            return Ok(());
+        }
+    }
+
     let codeai_dir = opts.root.join(".worktoolai").join("codeai");
     std::fs::create_dir_all(&codeai_dir)?;
 
@@ -87,10 +114,7 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     // Extra path filter (prefix)
     if let Some(ref pf) = opts.path_filter {
         let norm = pf.replace('\\', "/").trim_start_matches("./").to_string();
-        files = files
-            .into_iter()
-            .filter(|f| f.rel_path.starts_with(&norm))
-            .collect();
+        files.retain(|f| f.rel_path.starts_with(&norm));
     }
 
     let file_map: HashMap<String, crate::scanner::ScanResult> =
@@ -438,9 +462,10 @@ impl GitSyncPlan {
 
 fn compute_git_sync(root: &PathBuf, store: &Store) -> Result<GitSyncPlan> {
     if !root.join(".git").exists() {
-        let mut plan = GitSyncPlan::default();
-        plan.force_scan = true;
-        return Ok(plan);
+        return Ok(GitSyncPlan {
+            force_scan: true,
+            ..Default::default()
+        });
     }
     let mut plan = GitSyncPlan::default();
 

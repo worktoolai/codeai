@@ -390,6 +390,25 @@ impl Store {
         Ok(result)
     }
 
+    pub fn all_imports(&self) -> Result<Vec<ImportRow>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, raw_import, resolved_path, kind FROM imports")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ImportRow {
+                path: row.get(0)?,
+                raw_import: row.get(1)?,
+                resolved_path: row.get(2)?,
+                kind: row.get(3)?,
+            })
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     pub fn import_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn
