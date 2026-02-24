@@ -3,7 +3,11 @@ use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, Occur, QueryParser};
 use tantivy::schema::*;
+use tantivy::tokenizer::{Language, LowerCaser, RemoveLongFilter, SimpleTokenizer, Stemmer,
+    TextAnalyzer};
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
+
+const TOKENIZER_EN_STEM: &str = "en_stem";
 
 // ── Data types ──
 
@@ -50,16 +54,23 @@ impl SearchIndex {
     pub fn open(index_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(index_dir)?;
 
+        let stem_indexing = TextFieldIndexing::default()
+            .set_tokenizer(TOKENIZER_EN_STEM)
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions);
+        let stem_opts = TextOptions::default()
+            .set_indexing_options(stem_indexing)
+            .set_stored();
+
         let mut schema_builder = Schema::builder();
 
         let f_symbol_id = schema_builder.add_text_field("symbol_id", STRING | STORED);
-        let f_name = schema_builder.add_text_field("name", TEXT | STORED);
-        let f_path = schema_builder.add_text_field("path", TEXT | STORED);
+        let f_name = schema_builder.add_text_field("name", stem_opts.clone());
+        let f_path = schema_builder.add_text_field("path", stem_opts.clone());
         let f_kind = schema_builder.add_text_field("kind", STRING | STORED);
-        let f_signature = schema_builder.add_text_field("signature", TEXT | STORED);
-        let f_doc = schema_builder.add_text_field("doc", TEXT | STORED);
-        let f_preview = schema_builder.add_text_field("preview", TEXT | STORED);
-        let f_strings = schema_builder.add_text_field("strings", TEXT | STORED);
+        let f_signature = schema_builder.add_text_field("signature", stem_opts.clone());
+        let f_doc = schema_builder.add_text_field("doc", stem_opts.clone());
+        let f_preview = schema_builder.add_text_field("preview", stem_opts.clone());
+        let f_strings = schema_builder.add_text_field("strings", stem_opts);
 
         let schema = schema_builder.build();
 
@@ -68,6 +79,8 @@ impl SearchIndex {
         } else {
             Index::create_in_dir(index_dir, schema.clone()).context("create tantivy index")?
         };
+
+        register_tokenizers(&index);
 
         let reader = index
             .reader_builder()
@@ -101,7 +114,12 @@ impl SearchIndex {
         let term = tantivy::Term::from_field_text(self.f_symbol_id, &block.symbol_id);
         writer.delete_term(term);
 
-        writer.add_document(doc!(
+        // Index both the original identifier and a split form so the stemmer
+        // can match individual words (e.g. "ValidateAccessToken" →
+        // "Validate Access Token" → stems "valid access token").
+        // Tantivy indexes all values for a multi-valued field; get_first()
+        // returns the original (first) value for display.
+        let mut doc = doc!(
             self.f_symbol_id => block.symbol_id.clone(),
             self.f_name => block.name.clone(),
             self.f_path => block.path.clone(),
@@ -110,7 +128,18 @@ impl SearchIndex {
             self.f_doc => block.doc.clone(),
             self.f_preview => block.preview.clone(),
             self.f_strings => block.strings.clone(),
-        ))?;
+        );
+
+        let name_expanded = split_identifier(&block.name);
+        if name_expanded != block.name {
+            doc.add_text(self.f_name, &name_expanded);
+        }
+        let sig_expanded = split_identifier(&block.signature);
+        if sig_expanded != block.signature {
+            doc.add_text(self.f_signature, &sig_expanded);
+        }
+
+        writer.add_document(doc)?;
 
         Ok(())
     }
@@ -230,6 +259,60 @@ impl SearchIndex {
         writer.commit()?;
         Ok(())
     }
+}
+
+/// Split a code identifier into space-separated words.
+/// Handles camelCase, PascalCase, snake_case, SCREAMING_SNAKE, and mixtures.
+/// Example: "ValidateAccessToken" → "Validate Access Token"
+///          "get_user_by_id"     → "get user by id"
+///          "HTMLParser"         → "HTML Parser"
+fn split_identifier(s: &str) -> String {
+    let mut words = Vec::new();
+    let mut current = String::new();
+
+    for ch in s.chars() {
+        if ch == '_' || ch == '-' || ch == '.' || ch == '/' {
+            if !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+        } else if ch.is_uppercase() {
+            // Start a new word on case transitions:
+            // lowercase→Uppercase (camelCase boundary)
+            // But keep consecutive uppercase together (HTML) until a lowercase follows
+            let prev_lower = current.chars().last().map_or(false, |c| c.is_lowercase());
+            if prev_lower && !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+            current.push(ch);
+        } else if ch.is_lowercase() && current.len() > 1 && current.chars().all(|c| c.is_uppercase()) {
+            // "HTMLParser" → split "HTM" + "L" before "Parser": move last uppercase char to new word
+            let last = current.pop().unwrap();
+            if !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+            current.push(last);
+            current.push(ch);
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words.join(" ")
+}
+
+fn register_tokenizers(index: &Index) {
+    let en_stem = TextAnalyzer::builder(SimpleTokenizer::default())
+        .filter(RemoveLongFilter::limit(40))
+        .filter(LowerCaser)
+        .filter(Stemmer::new(Language::English))
+        .build();
+    index.tokenizers().register(TOKENIZER_EN_STEM, en_stem);
 }
 
 fn get_text(doc: &TantivyDocument, field: Field) -> String {

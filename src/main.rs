@@ -228,10 +228,15 @@ Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
 #[derive(Subcommand)]
 enum ProjectCommands {
     /// Infer entrypoint-based project structure
-    #[command(after_help = r#"  codeai project get
+    #[command(after_help = r#"  codeai project get                             # full project
+  codeai project get --path tokenai-proxy        # only files under prefix
   codeai project get --fmt thin
 Output: inferred-only graph/path structure (no project.json overrides)"#)]
     Get {
+        /// Filter by path prefix (e.g. subproject directory)
+        #[arg(long)]
+        path: Option<String>,
+
         /// Max output bytes
         #[arg(long, default_value = "12000")]
         max_bytes: u64,
@@ -248,9 +253,10 @@ fn main() {
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let result = match cli.command {
-        Commands::Project(ProjectCommands::Get { max_bytes, fmt }) => {
+        Commands::Project(ProjectCommands::Get { path, max_bytes, fmt }) => {
             commands::project::run(commands::project::ProjectOpts {
                 root,
+                path_filter: path,
                 max_bytes,
                 fmt,
             })

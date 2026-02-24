@@ -19,6 +19,7 @@ const ENTRYPOINT_BASENAMES: &[&str] = &[
 
 pub struct ProjectOpts {
     pub root: PathBuf,
+    pub path_filter: Option<String>,
     pub max_bytes: u64,
     pub fmt: String,
 }
@@ -85,6 +86,18 @@ pub fn run(opts: ProjectOpts) -> Result<()> {
 
     let all_paths = store.all_file_paths()?;
     let all_imports = store.all_imports()?;
+
+    let all_paths: Vec<String> = match &opts.path_filter {
+        Some(prefix) => all_paths.into_iter().filter(|p| p.starts_with(prefix.as_str())).collect(),
+        None => all_paths,
+    };
+    let all_imports: Vec<crate::store::ImportRow> = match &opts.path_filter {
+        Some(prefix) => all_imports.into_iter().filter(|imp| {
+            imp.path.starts_with(prefix.as_str())
+                && imp.resolved_path.as_ref().map_or(true, |rp| rp.starts_with(prefix.as_str()))
+        }).collect(),
+        None => all_imports,
+    };
 
     let (adj, rev_adj) = build_graph(&all_paths, &all_imports);
     let entrypoints = detect_entrypoints(&all_paths, &adj, &rev_adj);

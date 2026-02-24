@@ -60,12 +60,16 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     let search_dir = codeai_dir.join("search");
 
     let store = Store::open(&db_path)?;
-    let search_index = SearchIndex::open(&search_dir)?;
 
     if opts.full {
         store.clear_all()?;
-        search_index.clear_all()?;
+        // Remove and recreate search directory to pick up schema/tokenizer changes
+        if search_dir.exists() {
+            std::fs::remove_dir_all(&search_dir)?;
+        }
     }
+
+    let search_index = SearchIndex::open(&search_dir)?;
 
     // Build scanner for fallback / full indexing
     let mut scanner = Scanner::new(opts.root.clone())
