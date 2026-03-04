@@ -1,9 +1,11 @@
+pub mod edit;
 pub mod graph;
 pub mod index;
 pub mod open;
 pub mod outline;
 pub mod project;
 pub mod search;
+pub mod write;
 
 pub fn validate_nonzero(name: &str, value: u64) -> Result<(), String> {
     if value == 0 {

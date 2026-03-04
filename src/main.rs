@@ -78,6 +78,10 @@ enum Commands {
         /// Output format: thin, json, lines
         #[arg(long, default_value = "thin")]
         fmt: String,
+
+        /// Suppress stdout output (for scripting)
+        #[arg(long, short = 'q')]
+        quiet: bool,
     },
 
     /// Search for code blocks
@@ -195,6 +199,52 @@ Symbol ID format: path#kind#name or path#kind#name#N (N=occurrence index)
   codeai graph src/main.rs --external              # include unresolved external imports
 Output: --fmt tree (default, ASCII tree) | thin (compact JSON for agents)"#
     )]
+    /// Edit lines in a file (replace a line range with new content)
+    #[command(after_help = r#"  codeai edit src/main.rs --range L10-L15 -c "new code here"
+  echo "replacement" | codeai edit src/main.rs --range L5-L8 --content-file -
+  codeai edit src/main.rs --range L10-L15 -c "new code" --dry-run"#)]
+    Edit {
+        /// Target file path
+        file: String,
+
+        /// Line range to replace (e.g. L10-L15 or 10-15), 1-based inclusive
+        #[arg(long)]
+        range: String,
+
+        /// Inline replacement content
+        #[arg(short, long)]
+        content: Option<String>,
+
+        /// Read replacement content from file (use - for stdin)
+        #[arg(long)]
+        content_file: Option<String>,
+
+        /// Preview without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Write content to a file
+    #[command(after_help = r#"  codeai write out.rs -c "fn main() {}"
+  echo "content" | codeai write out.rs --content-file -
+  codeai write out.rs --content-file template.rs"#)]
+    Write {
+        /// Target file path
+        file: String,
+
+        /// Inline content
+        #[arg(short, long)]
+        content: Option<String>,
+
+        /// Read content from file (use - for stdin)
+        #[arg(long)]
+        content_file: Option<String>,
+
+        /// Preview without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     Graph {
         /// Entry file path (project-relative)
         path: String,
@@ -271,6 +321,7 @@ fn main() {
             ignore_file,
             max_bytes,
             fmt,
+            quiet,
         } => commands::index::run(commands::index::IndexOpts {
             root,
             full,
@@ -281,6 +332,7 @@ fn main() {
             ignore_file,
             max_bytes,
             fmt,
+            quiet,
         }),
 
         Commands::Search {
@@ -336,6 +388,32 @@ fn main() {
             max_bytes,
             offset,
             fmt,
+        }),
+
+        Commands::Edit {
+            file,
+            range,
+            content,
+            content_file,
+            dry_run,
+        } => commands::edit::run(commands::edit::EditOpts {
+            file,
+            range,
+            content,
+            content_file,
+            dry_run,
+        }),
+
+        Commands::Write {
+            file,
+            content,
+            content_file,
+            dry_run,
+        } => commands::write::run(commands::write::WriteOpts {
+            file,
+            content,
+            content_file,
+            dry_run,
         }),
 
         Commands::Graph {
