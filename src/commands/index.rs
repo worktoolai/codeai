@@ -10,6 +10,7 @@ use crate::parser;
 use crate::scanner::Scanner;
 use crate::search::{SearchDoc, SearchIndex};
 use crate::store::{BlockRow, FileMeta, ImportRow, Store};
+use tantivy::IndexWriter;
 
 use super::{validate_lang_filter, validate_nonzero};
 const IMPORTS_BACKFILL_META_KEY: &str = "imports_backfill_v1_done";
@@ -24,6 +25,7 @@ pub struct IndexOpts {
     pub ignore_file: Option<PathBuf>,
     pub max_bytes: u64,
     pub fmt: String,
+    pub quiet: bool,
 }
 
 pub fn run(opts: IndexOpts) -> Result<()> {
@@ -196,7 +198,7 @@ pub fn run(opts: IndexOpts) -> Result<()> {
             }
             continue;
         };
-        // Check if file changed
+        // Check if file changed (mtime+size skip)
         if !should_backfill_imports {
             if let Some(existing) = store.get_file(&file.rel_path)? {
                 if existing.mtime == file.mtime && existing.size == file.size {
@@ -206,200 +208,15 @@ pub fn run(opts: IndexOpts) -> Result<()> {
             }
         }
 
-        // Read file content
-        let content = match std::fs::read(&file.path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("warning: cannot read {}: {}", file.rel_path, e);
-                errors += 1;
-                continue;
-            }
-        };
-
-        // Compute hash
-        let content_hash = format!("{:016x}", xxh3_64(&content));
-
-        // Check hash for actual change
-        if !should_backfill_imports {
-            if let Some(existing) = store.get_file(&file.rel_path)? {
-                if existing.content_hash == content_hash {
-                    // mtime changed but content didn't — update mtime only
-                    store.upsert_file(&FileMeta {
-                        path: file.rel_path.clone(),
-                        mtime: file.mtime,
-                        size: file.size,
-                        content_hash,
-                        language: existing.language,
-                        parse_error: existing.parse_error,
-                    })?;
-                    skipped += 1;
-                    continue;
-                }
-            }
+        let result = reindex_file(&opts.root, &store, &search_index, &search_writer, &all_paths_set, file, should_backfill_imports)?;
+        if result.error {
+            errors += 1;
+        } else if result.skipped {
+            skipped += 1;
+        } else {
+            indexed_blocks += result.indexed_blocks;
+            indexed_files += 1;
         }
-
-        // File content changed: delete existing search docs for this path first
-        for b in store.blocks_for_file(&file.rel_path)? {
-            search_index.delete_by_symbol_id(&search_writer, &b.symbol_id)?;
-        }
-
-        // Get language config
-        let config = match lang::config_for_extension(&file.extension) {
-            Some(c) => c,
-            None => {
-                skipped += 1;
-                continue;
-            }
-        };
-
-        let ts_lang = match lang::ts_language_for_extension(&file.extension) {
-            Some(l) => l,
-            None => {
-                // Language config exists but no grammar crate — store file but skip parsing
-                store.upsert_file(&FileMeta {
-                    path: file.rel_path.clone(),
-                    mtime: file.mtime,
-                    size: file.size,
-                    content_hash: content_hash.clone(),
-                    language: Some(config.language.to_string()),
-                    parse_error: false,
-                })?;
-                store.replace_blocks(&file.rel_path, &[])?;
-                skipped += 1;
-                continue;
-            }
-        };
-
-        // Parse and extract blocks
-        let extracted = match parser::extract_blocks(
-            &content,
-            &file.rel_path,
-            config.language,
-            ts_lang,
-            config.function_nodes,
-            config.class_nodes,
-        ) {
-            Ok(blocks) => blocks,
-            Err(e) => {
-                eprintln!("warning: parse error {}: {}", file.rel_path, e);
-                store.upsert_file(&FileMeta {
-                    path: file.rel_path.clone(),
-                    mtime: file.mtime,
-                    size: file.size,
-                    content_hash: content_hash.clone(),
-                    language: Some(config.language.to_string()),
-                    parse_error: true,
-                })?;
-                errors += 1;
-                continue;
-            }
-        };
-
-        // Build symbol_ids with occurrence tracking
-        let mut name_counts: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
-        let mut block_rows = Vec::new();
-
-        // First pass: count occurrences
-        let mut occurrence_map: std::collections::HashMap<String, Vec<usize>> =
-            std::collections::HashMap::new();
-        for (i, block) in extracted.iter().enumerate() {
-            let key = format!("{}#{}", block.kind, block.name);
-            occurrence_map.entry(key).or_default().push(i);
-        }
-
-        // Second pass: build symbol_ids
-        for block in extracted.iter() {
-            let key = format!("{}#{}", block.kind, block.name);
-            let count_key = key.clone();
-            let total = occurrence_map.get(&key).map(|v| v.len()).unwrap_or(1);
-
-            let kind = BlockKind::from_str_loose(&block.kind);
-            let occurrence = if total > 1 {
-                let idx = name_counts.entry(count_key).or_insert(0);
-                let occ = *idx;
-                *idx += 1;
-                Some(occ)
-            } else {
-                None
-            };
-
-            let symbol_id = build_symbol_id(&file.rel_path, &kind, &block.name, occurrence);
-
-            let block_row = BlockRow {
-                symbol_id: symbol_id.clone(),
-                path: file.rel_path.clone(),
-                language: config.language.to_string(),
-                kind: block.kind.clone(),
-                name: block.name.clone(),
-                start_line: block.start_line,
-                start_col: block.start_col,
-                end_line: block.end_line,
-                end_col: block.end_col,
-                signature: block.signature.clone(),
-                doc: block.doc.clone(),
-                preview: block.preview.clone(),
-            };
-
-            // Index in search
-            let search_doc = SearchDoc {
-                symbol_id: symbol_id.clone(),
-                name: block.name.clone(),
-                path: file.rel_path.clone(),
-                kind: block.kind.clone(),
-                signature: block.signature.clone().unwrap_or_default(),
-                doc: block.doc.clone().unwrap_or_default(),
-                preview: block.preview.clone(),
-                strings: block.strings.join("\n"),
-            };
-            search_index.index_block(&search_writer, &search_doc)?;
-
-            block_rows.push(block_row);
-        }
-
-        indexed_blocks += block_rows.len() as u64;
-
-        // Store file metadata
-        store.upsert_file(&FileMeta {
-            path: file.rel_path.clone(),
-            mtime: file.mtime,
-            size: file.size,
-            content_hash: content_hash.clone(),
-            language: Some(config.language.to_string()),
-            parse_error: false,
-        })?;
-
-        // Store blocks
-        store.replace_blocks(&file.rel_path, &block_rows)?;
-
-        // Extract and store imports
-        if !config.import_nodes.is_empty() {
-            let ts_lang_for_imports = lang::ts_language_for_extension(&file.extension).unwrap();
-            if let Ok(extracted_imports) =
-                parser::extract_imports(&content, ts_lang_for_imports, config.import_nodes)
-            {
-                let import_rows: Vec<ImportRow> = extracted_imports
-                    .iter()
-                    .map(|ei| {
-                        let resolved = parser::resolve_import(
-                            &ei.raw_import,
-                            &file.rel_path,
-                            config.language,
-                            &all_paths_set,
-                        );
-                        ImportRow {
-                            path: file.rel_path.clone(),
-                            raw_import: ei.raw_import.clone(),
-                            resolved_path: resolved,
-                            kind: ei.kind.clone(),
-                        }
-                    })
-                    .collect();
-                let _ = store.replace_imports(&file.rel_path, &import_rows);
-            }
-        }
-
-        indexed_files += 1;
     }
 
     // Commit search index
@@ -414,6 +231,12 @@ pub fn run(opts: IndexOpts) -> Result<()> {
     if let Some(head) = current_git_head(&opts.root) {
         let _ = store.set_last_indexed_head(&head);
     }
+
+    // Update last_indexed_at timestamp
+    store.set_last_indexed_at(&format!("{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()))?;
 
     // Update generation
     let gen = store.next_generation()?;
@@ -435,8 +258,220 @@ pub fn run(opts: IndexOpts) -> Result<()> {
         })],
     );
 
-    println!("{}", serde_json::to_string(&resp)?);
+    if !opts.quiet {
+        println!("{}", serde_json::to_string(&resp)?);
+    }
     Ok(())
+}
+
+/// Result of reindexing a single file.
+pub struct ReindexResult {
+    pub indexed_blocks: u64,
+    pub skipped: bool,
+    pub error: bool,
+}
+
+/// Re-index a single file: read, hash, parse, store blocks + search docs.
+/// Assumes the caller has already determined the file needs re-indexing (mtime/size changed).
+/// If content hash matches the stored hash, updates mtime only and returns skipped=true.
+pub fn reindex_file(
+    _root: &std::path::Path,
+    store: &Store,
+    search_index: &SearchIndex,
+    search_writer: &IndexWriter,
+    all_paths_set: &HashSet<String>,
+    file: &crate::scanner::ScanResult,
+    force: bool,
+) -> Result<ReindexResult> {
+    // Read file content
+    let content = match std::fs::read(&file.path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: cannot read {}: {}", file.rel_path, e);
+            return Ok(ReindexResult { indexed_blocks: 0, skipped: false, error: true });
+        }
+    };
+
+    // Compute hash
+    let content_hash = format!("{:016x}", xxh3_64(&content));
+
+    // Check hash for actual change (skip when force=true, e.g. import backfill)
+    if !force {
+        if let Some(existing) = store.get_file(&file.rel_path)? {
+            if existing.content_hash == content_hash {
+                // mtime changed but content didn't — update mtime only
+                store.upsert_file(&FileMeta {
+                    path: file.rel_path.clone(),
+                    mtime: file.mtime,
+                    size: file.size,
+                    content_hash,
+                    language: existing.language,
+                    parse_error: existing.parse_error,
+                })?;
+                return Ok(ReindexResult { indexed_blocks: 0, skipped: true, error: false });
+            }
+        }
+    }
+
+    // File content changed: delete existing search docs for this path first
+    for b in store.blocks_for_file(&file.rel_path)? {
+        search_index.delete_by_symbol_id(search_writer, &b.symbol_id)?;
+    }
+
+    // Get language config
+    let config = match lang::config_for_extension(&file.extension) {
+        Some(c) => c,
+        None => {
+            return Ok(ReindexResult { indexed_blocks: 0, skipped: true, error: false });
+        }
+    };
+
+    let ts_lang = match lang::ts_language_for_extension(&file.extension) {
+        Some(l) => l,
+        None => {
+            // Language config exists but no grammar crate — store file but skip parsing
+            store.upsert_file(&FileMeta {
+                path: file.rel_path.clone(),
+                mtime: file.mtime,
+                size: file.size,
+                content_hash: content_hash.clone(),
+                language: Some(config.language.to_string()),
+                parse_error: false,
+            })?;
+            store.replace_blocks(&file.rel_path, &[])?;
+            return Ok(ReindexResult { indexed_blocks: 0, skipped: true, error: false });
+        }
+    };
+
+    // Parse and extract blocks
+    let extracted = match parser::extract_blocks(
+        &content,
+        &file.rel_path,
+        config.language,
+        ts_lang,
+        config.function_nodes,
+        config.class_nodes,
+    ) {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            eprintln!("warning: parse error {}: {}", file.rel_path, e);
+            store.upsert_file(&FileMeta {
+                path: file.rel_path.clone(),
+                mtime: file.mtime,
+                size: file.size,
+                content_hash: content_hash.clone(),
+                language: Some(config.language.to_string()),
+                parse_error: true,
+            })?;
+            return Ok(ReindexResult { indexed_blocks: 0, skipped: false, error: true });
+        }
+    };
+
+    // Build symbol_ids with occurrence tracking
+    let mut name_counts: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+    let mut block_rows = Vec::new();
+
+    // First pass: count occurrences
+    let mut occurrence_map: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, block) in extracted.iter().enumerate() {
+        let key = format!("{}#{}", block.kind, block.name);
+        occurrence_map.entry(key).or_default().push(i);
+    }
+
+    // Second pass: build symbol_ids
+    for block in extracted.iter() {
+        let key = format!("{}#{}", block.kind, block.name);
+        let count_key = key.clone();
+        let total = occurrence_map.get(&key).map(|v| v.len()).unwrap_or(1);
+
+        let kind = BlockKind::from_str_loose(&block.kind);
+        let occurrence = if total > 1 {
+            let idx = name_counts.entry(count_key).or_insert(0);
+            let occ = *idx;
+            *idx += 1;
+            Some(occ)
+        } else {
+            None
+        };
+
+        let symbol_id = build_symbol_id(&file.rel_path, &kind, &block.name, occurrence);
+
+        let block_row = BlockRow {
+            symbol_id: symbol_id.clone(),
+            path: file.rel_path.clone(),
+            language: config.language.to_string(),
+            kind: block.kind.clone(),
+            name: block.name.clone(),
+            start_line: block.start_line,
+            start_col: block.start_col,
+            end_line: block.end_line,
+            end_col: block.end_col,
+            signature: block.signature.clone(),
+            doc: block.doc.clone(),
+            preview: block.preview.clone(),
+        };
+
+        // Index in search
+        let search_doc = SearchDoc {
+            symbol_id: symbol_id.clone(),
+            name: block.name.clone(),
+            path: file.rel_path.clone(),
+            kind: block.kind.clone(),
+            signature: block.signature.clone().unwrap_or_default(),
+            doc: block.doc.clone().unwrap_or_default(),
+            preview: block.preview.clone(),
+            strings: block.strings.join("\n"),
+        };
+        search_index.index_block(search_writer, &search_doc)?;
+
+        block_rows.push(block_row);
+    }
+
+    let indexed_blocks = block_rows.len() as u64;
+
+    // Store file metadata
+    store.upsert_file(&FileMeta {
+        path: file.rel_path.clone(),
+        mtime: file.mtime,
+        size: file.size,
+        content_hash: content_hash.clone(),
+        language: Some(config.language.to_string()),
+        parse_error: false,
+    })?;
+
+    // Store blocks
+    store.replace_blocks(&file.rel_path, &block_rows)?;
+
+    // Extract and store imports
+    if !config.import_nodes.is_empty() {
+        let ts_lang_for_imports = lang::ts_language_for_extension(&file.extension).unwrap();
+        if let Ok(extracted_imports) =
+            parser::extract_imports(&content, ts_lang_for_imports, config.import_nodes)
+        {
+            let import_rows: Vec<ImportRow> = extracted_imports
+                .iter()
+                .map(|ei| {
+                    let resolved = parser::resolve_import(
+                        &ei.raw_import,
+                        &file.rel_path,
+                        config.language,
+                        all_paths_set,
+                    );
+                    ImportRow {
+                        path: file.rel_path.clone(),
+                        raw_import: ei.raw_import.clone(),
+                        resolved_path: resolved,
+                        kind: ei.kind.clone(),
+                    }
+                })
+                .collect();
+            let _ = store.replace_imports(&file.rel_path, &import_rows);
+        }
+    }
+
+    Ok(ReindexResult { indexed_blocks, skipped: false, error: false })
 }
 
 // Helper: loose BlockKind parsing that doesn't fail

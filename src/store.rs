@@ -157,6 +157,14 @@ impl Store {
         self.set_meta("git_head", head)
     }
 
+    pub fn last_indexed_at(&self) -> Result<Option<String>> {
+        self.get_meta("last_indexed_at")
+    }
+
+    pub fn set_last_indexed_at(&self, ts: &str) -> Result<()> {
+        self.set_meta("last_indexed_at", ts)
+    }
+
     // ── Files ──
 
     pub fn get_file(&self, path: &str) -> Result<Option<FileMeta>> {

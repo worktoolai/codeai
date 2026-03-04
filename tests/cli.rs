@@ -1518,3 +1518,171 @@ fn test_worktoolai_is_always_ignored() {
         "symbols under .worktoolai must not be indexed"
     );
 }
+
+// ── Auto re-index (ensure_fresh) tests ──
+
+#[test]
+fn test_search_reflects_modified_file() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Verify initial state: search finds ValidatePayment
+    let output = codeai()
+        .args(["search", "ValidatePayment", "--limit", "5"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+    assert!(!items.is_empty(), "should find ValidatePayment before edit");
+
+    // Modify the file: rename ValidatePayment → CheckPayment
+    std::thread::sleep(std::time::Duration::from_secs(1)); // ensure mtime changes
+    fs::write(
+        dir.path().join("services/payment/validate.go"),
+        r#"package payment
+
+func CheckPayment(amount int, currency string) error {
+    if amount <= 0 {
+        return fmt.Errorf("invalid amount %d", amount)
+    }
+    return nil
+}
+"#,
+    )
+    .unwrap();
+
+    // Search WITHOUT re-running `codeai index` — ensure_fresh should pick it up
+    let output = codeai()
+        .args(["search", "CheckPayment", "--limit", "5"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+    assert!(
+        !items.is_empty(),
+        "search should find CheckPayment after auto re-index"
+    );
+    assert_eq!(items[0][1].as_str().unwrap(), "CheckPayment");
+}
+
+#[test]
+fn test_outline_reflects_deleted_file() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Verify initial state: outline works for validate.go
+    let output = codeai()
+        .args(["outline", "services/payment/validate.go"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+    assert!(!items.is_empty(), "outline should list blocks before delete");
+
+    // Delete the file
+    fs::remove_file(dir.path().join("services/payment/validate.go")).unwrap();
+
+    // Outline should now return FILE_NOT_FOUND after auto re-index cleans it up
+    let output = codeai()
+        .args(["outline", "services/payment/validate.go"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+    assert_eq!(
+        resp["e"]["code"].as_str().unwrap(),
+        "FILE_NOT_FOUND",
+        "outline should report file not found after deletion and auto re-index"
+    );
+}
+
+#[test]
+fn test_open_reflects_modified_content() {
+    let dir = setup_project();
+    setup_git_repo(dir.path());
+
+    codeai()
+        .arg("index")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    // Get symbol_id for gcd
+    let output = codeai()
+        .args(["search", "gcd", "--limit", "1"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+    assert!(!items.is_empty());
+    let symbol_id = items[0][0].as_str().unwrap().to_string();
+
+    // Modify the file: change gcd to compute_gcd
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    fs::write(
+        dir.path().join("utils/math.rs"),
+        r#"/// Compute the greatest common divisor (renamed).
+pub fn compute_gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+"#,
+    )
+    .unwrap();
+
+    // Open old symbol_id — should fail (symbol moved) after auto re-index
+    let output = codeai()
+        .args(["open", "--symbol", &symbol_id])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let resp = parse_response(&output.stdout);
+
+    // The old symbol should not resolve to the old content.
+    // Either it finds compute_gcd via fallback or reports not found.
+    if resp.get("e").is_some() {
+        // Symbol not found — expected
+    } else {
+        // Fallback matched — should be compute_gcd now
+        let items = get_items(&resp);
+        assert!(!items.is_empty());
+        let name = items[0][1].as_str().unwrap();
+        assert_ne!(name, "gcd", "should not return old gcd after re-index");
+    }
+
+    // Search for compute_gcd should work
+    let output = codeai()
+        .args(["search", "compute_gcd", "--limit", "1"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let resp = parse_response(&output.stdout);
+    let items = get_items(&resp);
+    assert!(
+        !items.is_empty(),
+        "search should find compute_gcd after auto re-index"
+    );
+}

@@ -65,6 +65,14 @@ pub fn run(opts: OpenOpts) -> Result<()> {
 
     let store = Store::open(&db_path)?;
 
+    // Auto re-index stale files before querying
+    let search_dir = codeai_dir.join("search");
+    if let Ok(search_index) = crate::search::SearchIndex::open(&search_dir) {
+        if let Err(e) = crate::autoreindex::ensure_fresh(&opts.root, &store, &search_index) {
+            eprintln!("warning: auto re-index failed: {e}");
+        }
+    }
+
     if let Some(ref symbol_id) = opts.symbol {
         return run_single_open(&opts, &store, symbol_id);
     }

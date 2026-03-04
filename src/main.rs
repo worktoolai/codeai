@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod autoreindex;
 mod commands;
 mod lang;
 mod models;

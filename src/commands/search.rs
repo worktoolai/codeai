@@ -75,6 +75,9 @@ pub fn run(opts: SearchOpts) -> Result<()> {
     let store = Store::open(&db_path)?;
     let search_index = SearchIndex::open(&search_dir)?;
 
+    // Auto re-index stale files before querying
+    crate::autoreindex::ensure_fresh(&opts.root, &store, &search_index)?;
+
     // Check for stale cursor
     if let Some(ref cursor) = opts.cursor {
         let gen = store.generation()?;
